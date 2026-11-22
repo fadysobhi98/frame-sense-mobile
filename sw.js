@@ -33,7 +33,7 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
-  const bucket = /mediapipe|tasks-vision|googleapis|huggingface|hf\.co|onnxruntime|jsdelivr|/raw/.test(event.request.url) ? AI_CACHE : CACHE;
+  const bucket = /mediapipe|tasks-vision|googleapis|huggingface|hf\.co|onnxruntime|jsdelivr|\/raw\//.test(event.request.url) ? AI_CACHE : CACHE;
   // app shell (navigations / html): network-first so updates actually reach users, cache as offline fallback
   const isShell = event.request.mode === "navigate" || /\/(index\.html)?$/.test(new URL(event.request.url).pathname);
   if (isShell) {
