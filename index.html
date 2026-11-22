@@ -183,7 +183,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Originals are never modified. Editing is non-destructive and exports are new JPEG copies, exactly as the Frame Sense specification requires.</span>
     </div>
-    <footer class="foot">Frame Sense Mobile · v1.7.1 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 verified; NEF / ARW / DNG untested) decodes on this device with the RAW file kept untouched. High Sharpness and Crop / Instagram Ready exports are built in. Desktop pairing is still planned.</footer>
+    <footer class="foot">Frame Sense Mobile · v1.7.2 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 verified; NEF / ARW / DNG untested) decodes on this device with the RAW file kept untouched. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Desktop pairing is still planned.</footer>
   </section>
 
   <!-- PROJECTS -->
@@ -325,7 +325,7 @@ function idbDel(store, key){
 const uid = ()=> Date.now().toString(36) + Math.random().toString(36).slice(2,8);
 
 /* ---------- state ---------- */
-const state = { projects:[], activeProjectId:null, editPhotoId:null, edit:null, galleryTab:"originals" };
+const state = { projects:[], activeProjectId:null, editPhotoId:null, edit:null, galleryTab:"originals", collageMode:false, collageSel:[] };
 
 const PRESETS = {
   "FS Basic":  {b:1.02, c:1.06, s:1.08, w:0.04, note:"Approved baseline"},
@@ -524,7 +524,7 @@ async function renderGallery(){
         const sections=order.map(([key,label])=>{
           const v=shown.filter(p=>((p.scene&&p.scene.key)||"other")===key);
           if(!v.length) return "";
-          return `<div class="eyebrow" style="margin-top:10px">${label} (${v.length})</div><div class="grid">${v.map(p=>`<div class="thumb" data-phid="${p.id}"><img src="${URL.createObjectURL(p.blob)}" alt="">${qBadge(p.analysis)}</div>`).join("")}</div>`;
+          return `<div class="eyebrow" style="margin-top:10px">${label} (${v.length})</div><div class="grid">${v.map(p=>`<div class="thumb" data-phid="${p.id}" data-kind="${p.kind}"><img src="${URL.createObjectURL(p.blob)}" alt="">${qBadge(p.analysis)}</div>`).join("")}</div>`;
         }).join("");
         return sections + `<div class="note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg><span>Scene groups are experimental zero-shot guesses from a small on-device model; photos it is unsure about land in Uncertain &amp; Other. Check before relying on them.</span></div>`;
       })() : state.galleryGroup&&tab==="originals" ? (()=>{
@@ -532,15 +532,21 @@ async function renderGallery(){
         return grp.map(([label,test])=>{
           const v=shown.filter(test);
           if(!v.length) return "";
-          return `<div class="eyebrow" style="margin-top:10px">${label}</div><div class="grid">${v.map(p=>`<div class="thumb" data-phid="${p.id}"><img src="${URL.createObjectURL(p.blob)}" alt="">${qBadge(p.analysis)+(p.best?` <span class="q-badge" style="background:#d4a857;color:#171310">&#9733; Best Shot</span>`:"")}</div>`).join("")}</div>`;
+          return `<div class="eyebrow" style="margin-top:10px">${label}</div><div class="grid">${v.map(p=>`<div class="thumb" data-phid="${p.id}" data-kind="${p.kind}"><img src="${URL.createObjectURL(p.blob)}" alt="">${qBadge(p.analysis)+(p.best?` <span class="q-badge" style="background:#d4a857;color:#171310">&#9733; Best Shot</span>`:"")}</div>`).join("")}</div>`;
         }).join("");
-      })() : `<div class="grid">${shown.map(p=>`<div class="thumb" data-phid="${p.id}"><img src="${URL.createObjectURL(p.blob)}" alt="">${p.kind==="original"?(p.raw?`<span class="q-badge" style="top:4px;bottom:auto">RAW · JPEG working copy</span> `:"")+qBadge(p.analysis)+(p.best?` <span class="q-badge" style="background:#d4a857;color:#171310">&#9733; Best Shot</span>`:""):""}</div>`).join("")}</div>`}
+      })() : `<div class="grid">${shown.map(p=>`<div class="thumb" data-phid="${p.id}" data-kind="${p.kind}"><img src="${URL.createObjectURL(p.blob)}" alt="">${p.kind==="original"?(p.raw?`<span class="q-badge" style="top:4px;bottom:auto">RAW · JPEG working copy</span> `:"")+qBadge(p.analysis)+(p.best?` <span class="q-badge" style="background:#d4a857;color:#171310">&#9733; Best Shot</span>`:""):""}</div>`).join("")}</div>`}
     ${tab==="originals"&&shown.length?`<div class="note">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Badges are basic exposure/focus checks computed on this device, a small honest subset of the planned AI Smart Review, not full AI analysis.</span>
     </div>`:""}
     ${shown.length===0 ? `<div class="empty">${tab==="originals" ? "No photos yet. Import from your device below." : "No edited exports yet. Edit a photo and export it."}</div>` : ""}
     <div style="height:12px"></div>
+    <div id="collage-bar" style="display:${state.collageMode?"flex":"none"};gap:8px;align-items:center;margin-bottom:10px">
+      <span class="sub" id="collage-count">0 selected</span>
+      <button class="btn btn-gold" id="collage-build" style="flex:1">Build collage</button>
+      <button class="btn btn-ghost" id="collage-cancel">Cancel</button>
+    </div>
+    <button class="btn btn-ghost" id="g-collage" style="margin-bottom:10px">Collage · pick 2 to 4 photos (simple grid, JPEG)</button>
     <button class="btn btn-ghost" id="g-best" style="margin-bottom:10px">&#9733; Pick Best Shots (auto, on this device)</button>
     <button class="btn btn-gold" id="g-import">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M6 10l6-6 6 6"/><path d="M4 20h16"/></svg>
@@ -571,12 +577,31 @@ async function renderGallery(){
     state.galleryTab=b.dataset.tab; renderGallery();
   }));
   body.querySelectorAll(".thumb").forEach(t=>t.addEventListener("click", ()=>{
+    if(state.collageMode){
+      if(t.dataset.kind!=="original"){ toast("Collages are built from originals"); return; }
+      const id=t.dataset.phid, i=state.collageSel.indexOf(id);
+      if(i>=0){ state.collageSel.splice(i,1); t.style.outline=""; }
+      else if(state.collageSel.length<4){ state.collageSel.push(id); t.style.outline="3px solid #d4a857"; }
+      else { toast("Up to 4 photos per collage"); return; }
+      const cnt=body.querySelector("#collage-count"); if(cnt) cnt.textContent=state.collageSel.length+" selected";
+      return;
+    }
     state.editPhotoId = t.dataset.phid;
     document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("active", b.dataset.view==="edit"));
     showView("edit");
   }));
   const imp = body.querySelector("#g-import");
   if(imp) imp.addEventListener("click", ()=>$("#file-input").click());
+  const colBtn = body.querySelector("#g-collage");
+  if(colBtn) colBtn.addEventListener("click", ()=>{
+    if(tab!=="originals"){ toast("Switch to Originals to pick collage photos"); return; }
+    state.collageMode=true; state.collageSel=[];
+    renderGallery();
+  });
+  const colCancel = body.querySelector("#collage-cancel");
+  if(colCancel) colCancel.addEventListener("click", ()=>{ state.collageMode=false; state.collageSel=[]; renderGallery(); });
+  const colBuild = body.querySelector("#collage-build");
+  if(colBuild) colBuild.addEventListener("click", ()=>buildCollage());
   const bestBtn = body.querySelector("#g-best");
   if(bestBtn) bestBtn.addEventListener("click", async ()=>{
     const origs=(await idbAll("photos")).filter(x=>x.projectId===proj.id && x.kind==="original");
@@ -771,6 +796,44 @@ async function renderGallery(){
       }
       if(changed && document.querySelector("#view-gallery").classList.contains("active")) renderGallery();
     })();
+  }
+}
+
+async function buildCollage(){
+  const proj=activeProject(); if(!proj) return;
+  const ids=state.collageSel.slice(0,4);
+  if(ids.length<2){ toast("Pick 2 to 4 photos for the collage"); return; }
+  try{
+    const photos=[];
+    for(const id of ids){ const p=await idbGet("photos", id); if(p) photos.push(p); }
+    const n=photos.length;
+    if(n<2){ toast("Picked photos were not found"); return; }
+    const cell=1024, gap=12;
+    const cols=2, rows=n===2?1:2;
+    const cv=document.createElement("canvas");
+    cv.width=cols*cell+(cols+1)*gap; cv.height=rows*cell+(rows+1)*gap;
+    const ctx=cv.getContext("2d"); ctx.fillStyle="#171310"; ctx.fillRect(0,0,cv.width,cv.height);
+    const layouts={2:[[0,0,1],[1,0,1]], 3:[[0,0,2],[0,1,1],[1,1,1]], 4:[[0,0,1],[1,0,1],[0,1,1],[1,1,1]]};
+    const pos=layouts[n];
+    for(let i=0;i<n;i++){
+      const [c,r,span]=pos[i];
+      const img=await loadImage(photos[i].blob);
+      const cw=span*cell+(span-1)*gap, ch=cell;
+      const x=gap+c*(cell+gap), y=gap+r*(cell+gap);
+      const ia=img.naturalWidth/img.naturalHeight, ca=cw/ch;
+      let sw,sh;
+      if(ia>ca){ sh=img.naturalHeight; sw=sh*ca; } else { sw=img.naturalWidth; sh=sw/ca; }
+      const sx=(img.naturalWidth-sw)/2, sy=(img.naturalHeight-sh)/2;
+      ctx.drawImage(img,sx,sy,sw,sh,x,y,cw,ch);
+    }
+    const blob=await new Promise(res=>cv.toBlob(res,"image/jpeg",0.9));
+    if(!blob) throw new Error("collage encode failed");
+    await idbPut("photos",{ id:uid(), projectId:proj.id, kind:"export", name:"collage_"+n+"_photos.jpg", blob, created:Date.now() });
+    state.collageMode=false; state.collageSel=[];
+    toast("Collage saved in the Edited tab (simple grid, JPEG)");
+    renderGallery(); renderHome();
+  }catch(e){
+    toast("Collage failed: "+(e.message||e));
   }
 }
 
