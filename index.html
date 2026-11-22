@@ -183,7 +183,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Originals are never modified. Editing is non-destructive and exports are new JPEG copies, exactly as the Frame Sense specification requires.</span>
     </div>
-    <footer class="foot">Frame Sense Mobile · v1.3 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch. Scene categories (Dance / Party / Hall), RAW support and desktop pairing are still planned.</footer>
+    <footer class="foot">Frame Sense Mobile · v1.4 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch. Scene categories (Dance / Party / Hall), RAW support and desktop pairing are still planned.</footer>
   </section>
 
   <!-- PROJECTS -->
@@ -343,6 +343,29 @@ function toast(msg){
 }
 function filterString(e){
   return `brightness(${e.b.toFixed(3)}) contrast(${e.c.toFixed(3)}) saturate(${e.s.toFixed(3)}) sepia(${e.w.toFixed(3)})`;
+}
+// Bake the same edits into pixels. Needed because iOS Safari ignores canvas ctx.filter,
+// which silently exported the "before" image. This path works everywhere.
+function bakeEdits(canvas, e){
+  const b=e.b??1, c=e.c??1, s=e.s??1, w=e.w??0;
+  if(b===1&&c===1&&s===1&&!w) return;
+  const ctx=canvas.getContext("2d");
+  const id=ctx.getImageData(0,0,canvas.width,canvas.height);
+  const d=id.data;
+  for(let i=0;i<d.length;i+=4){
+    let r=d[i]*b, g=d[i+1]*b, bl=d[i+2]*b;
+    r=(r-128)*c+128; g=(g-128)*c+128; bl=(bl-128)*c+128;
+    const lu=0.2126*r+0.7152*g+0.0722*bl;
+    r=lu+(r-lu)*s; g=lu+(g-lu)*s; bl=lu+(bl-lu)*s;
+    if(w){
+      const sr=0.393*r+0.769*g+0.189*bl, sg=0.349*r+0.686*g+0.168*bl, sb=0.272*r+0.534*g+0.131*bl;
+      r=r+(sr-r)*w; g=g+(sg-g)*w; bl=bl+(sb-bl)*w;
+    }
+    d[i]=r<0?0:r>255?255:Math.round(r);
+    d[i+1]=g<0?0:g>255?255:Math.round(g);
+    d[i+2]=bl<0?0:bl>255?255:Math.round(bl);
+  }
+  ctx.putImageData(id,0,0);
 }
 function fmtDate(d){ try{ return new Date(d+"T00:00:00").toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"}); }catch(_){ return d; } }
 
@@ -645,11 +668,11 @@ async function renderEdit(){
       </select></div>
       <div class="note" style="margin-top:4px">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
-        <span>Export saves an edited JPEG inside this project automatically (Mobile Export Engine). The original RAW/JPEG stays untouched. Saving an extra copy to the phone gallery is your choice only.</span>
+        <span>Export saves an edited JPEG inside this project automatically (Mobile Export Engine). The original stays untouched. "Save to phone gallery" opens the share sheet on iPhone; choose "Save Image" to put the edited JPEG straight into Photos.</span>
       </div>
       <div class="row2">
         <button class="btn btn-gold" id="ex-save">Export to project</button>
-        <button class="btn btn-ghost" id="ex-save-copy" disabled>Save gallery copy</button>
+        <button class="btn btn-ghost" id="ex-save-copy" disabled>Save to phone gallery</button>
       </div>
     </div>
     <div class="card">
@@ -735,9 +758,9 @@ async function renderEdit(){
       c2.width=Math.max(1,Math.round((swap?H:W)*scale));
       c2.height=Math.max(1,Math.round((swap?W:H)*scale));
       const x2=c2.getContext("2d");
-      x2.filter=filterString(state.edit);
       x2.translate(c2.width/2,c2.height/2); x2.rotate(rot*Math.PI/180); x2.scale(scale,scale);
       x2.drawImage(c,-W/2,-H/2);
+      bakeEdits(c2, state.edit);
       const q=Math.min(100,Math.max(50,state.edit.quality))/100;
       const blob=await new Promise(res=>c2.toBlob(res,"image/jpeg",q));
       await idbPut("photos",{ id:uid(), projectId:photo.projectId, kind:"export", parentId:photo.id,
@@ -825,11 +848,11 @@ async function doExport(photo, alsoDownload){
     canvas.width=Math.max(1,Math.round((swap?img.naturalHeight:img.naturalWidth)*scale));
     canvas.height=Math.max(1,Math.round((swap?img.naturalWidth:img.naturalHeight)*scale));
     const ctx=canvas.getContext("2d");
-    ctx.filter = filterString(state.edit);
     ctx.translate(canvas.width/2, canvas.height/2);
     ctx.rotate(rot*Math.PI/180);
     ctx.scale(scale, scale);
     ctx.drawImage(img,-img.naturalWidth/2,-img.naturalHeight/2);
+    bakeEdits(canvas, state.edit);
     const q = Math.min(100, Math.max(50, state.edit.quality))/100;
     const blob = await new Promise(res=>canvas.toBlob(res,"image/jpeg",q));
     if(!blob) throw new Error("Export failed");
@@ -841,11 +864,20 @@ async function doExport(photo, alsoDownload){
     toast("Edited JPEG saved inside the project");
     const copyBtn=$("#ex-save-copy"); copyBtn.disabled=false;
     if(alsoDownload){
-      const a=document.createElement("a");
-      a.href=URL.createObjectURL(blob);
-      a.download=photo.name.replace(/\.[^.]+$/,"")+"_edited.jpg";
-      document.body.appendChild(a); a.click(); a.remove();
-      toast("Gallery copy download started");
+      const fname=photo.name.replace(/\.[^.]+$/,"")+"_edited.jpg";
+      const file=new File([blob], fname, {type:"image/jpeg"});
+      if(navigator.canShare && navigator.canShare({files:[file]})){
+        try{
+          await navigator.share({files:[file], title:"Frame Sense export"});
+          toast("Pick 'Save Image' in the share sheet to put it in Photos");
+        }catch(e){ if(e && e.name!=="AbortError") toast("Share did not complete"); }
+      }else{
+        const a=document.createElement("a");
+        a.href=URL.createObjectURL(blob);
+        a.download=fname;
+        document.body.appendChild(a); a.click(); a.remove();
+        toast("Gallery copy download started");
+      }
     }
   }catch(e){
     toast("Export failed: "+(e.message||e));
