@@ -183,7 +183,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Originals are never modified. Editing is non-destructive and exports are new JPEG copies, exactly as the Frame Sense specification requires.</span>
     </div>
-    <footer class="foot">Frame Sense Mobile · v1.5.1 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch. Scene categories (Dance / Party / Hall), RAW support and desktop pairing are still planned.</footer>
+    <footer class="foot">Frame Sense Mobile · v1.6.0 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 verified; NEF / ARW / DNG untested) decodes on this device with the RAW file kept untouched. Desktop pairing is still planned.</footer>
   </section>
 
   <!-- PROJECTS -->
@@ -272,7 +272,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
 </nav>
 
 <div class="toast" id="toast"></div>
-<input type="file" id="file-input" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" multiple style="display:none">
+<input type="file" id="file-input" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.cr2,.cr3,.nef,.arw,.dng" multiple style="display:none">
 
 <script>
 "use strict";
@@ -510,7 +510,7 @@ async function renderGallery(){
           if(!v.length) return "";
           return `<div class="eyebrow" style="margin-top:10px">${label}</div><div class="grid">${v.map(p=>`<div class="thumb" data-phid="${p.id}"><img src="${URL.createObjectURL(p.blob)}" alt="">${qBadge(p.analysis)+(p.best?` <span class="q-badge" style="background:#d4a857;color:#171310">&#9733; Best Shot</span>`:"")}</div>`).join("")}</div>`;
         }).join("");
-      })() : `<div class="grid">${shown.map(p=>`<div class="thumb" data-phid="${p.id}"><img src="${URL.createObjectURL(p.blob)}" alt="">${p.kind==="original"?qBadge(p.analysis)+(p.best?` <span class="q-badge" style="background:#d4a857;color:#171310">&#9733; Best Shot</span>`:""):""}</div>`).join("")}</div>`}
+      })() : `<div class="grid">${shown.map(p=>`<div class="thumb" data-phid="${p.id}"><img src="${URL.createObjectURL(p.blob)}" alt="">${p.kind==="original"?(p.raw?`<span class="q-badge" style="top:4px;bottom:auto">RAW · JPEG working copy</span> `:"")+qBadge(p.analysis)+(p.best?` <span class="q-badge" style="background:#d4a857;color:#171310">&#9733; Best Shot</span>`:""):""}</div>`).join("")}</div>`}
     ${tab==="originals"&&shown.length?`<div class="note">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Badges are basic exposure/focus checks computed on this device, a small honest subset of the planned AI Smart Review, not full AI analysis.</span>
@@ -523,7 +523,7 @@ async function renderGallery(){
       Import photos</button>
     <div class="note">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
-      <span>Import copies JPEG / PNG / WebP into the app. RAW files (CR2, NEF, ARW...) are not decoded in this mobile v1, they are skipped honestly rather than claimed.</span>
+      <span>Import copies JPEG / PNG / WebP into the app. RAW files need the optional RAW import engine below (about 2 MB, runs on this device). Canon CR2 is verified by our tests; Nikon NEF, Sony ARW and DNG are supported by the decoder library but not individually tested yet. Your RAW file is kept untouched; editing uses a clearly labeled JPEG working copy.</span>
     </div>
     <div class="card" id="ai-card">
       <div class="eyebrow">AI ENGINE · RUNS ON THIS DEVICE</div>
@@ -535,6 +535,9 @@ async function renderGallery(){
       <button class="btn btn-ghost" id="scene-enable">Enable scene grouping (experimental, one-time download, about 66 MB)</button>
       <button class="btn btn-ghost" id="scene-group" style="display:none; margin-top:8px">Group by scene (experimental)</button>
       <button class="btn btn-ghost" id="scene-remove" style="display:none; margin-top:8px; opacity:.75">Remove scene engine from this device (frees about 66 MB)</button>
+      <div id="raw-status" class="sub" style="margin:14px 0 10px">RAW import engine: not installed.</div>
+      <button class="btn btn-ghost" id="raw-enable">Enable RAW import (one-time download, about 2 MB)</button>
+      <button class="btn btn-ghost" id="raw-remove" style="display:none; margin-top:8px; opacity:.75">Remove RAW engine from this device (frees about 2 MB)</button>
       <div class="note" style="margin-top:8px">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
         <span>The engine is downloaded once, cached on your device, and works offline after. Photos are analyzed on this phone and are never uploaded anywhere.</span>
@@ -689,6 +692,50 @@ async function renderGallery(){
       renderGallery();
     });
   }
+  // RAW import engine card
+  const rawStatus=body.querySelector("#raw-status"), rawEnable=body.querySelector("#raw-enable"), rawRemove=body.querySelector("#raw-remove");
+  if(rawEnable){
+    if(rawConsented()){
+      rawStatus.textContent="RAW import engine: approved. It loads on first RAW import, no extra downloads after.";
+      rawEnable.style.display="none"; rawRemove.style.display="block";
+    }
+    rawEnable.addEventListener("click", async ()=>{
+      rawEnable.disabled=true; rawEnable.textContent="Downloading RAW engine (about 2 MB, one time)…";
+      try{
+        try{ localStorage.setItem("fsAIRaw","1"); }catch(_){}
+        if(!rawLib){ const m=await import("./raw/index.js"); rawLib=m.default; }
+        const warm=new rawLib();
+        try{ await warm.metadata(false); }catch(_){}
+        try{ warm.dispose(); }catch(_){}
+        rawStatus.textContent="RAW import engine: ready on this device (works offline now).";
+        rawEnable.style.display="none"; rawRemove.style.display="block";
+        toast("RAW engine ready. RAW files are decoded on this device only.");
+      }catch(e){
+        rawEnable.disabled=false; rawEnable.textContent="Enable RAW import (one-time download, about 2 MB)";
+        toast("RAW engine download failed. Check the connection and try again.");
+      }
+    });
+    rawRemove.addEventListener("click", async ()=>{
+      rawRemove.disabled=true; rawRemove.textContent="Removing RAW engine from this device…";
+      try{ localStorage.removeItem("fsAIRaw"); }catch(_){}
+      rawLib=null;
+      try{
+        const keys=await caches.keys();
+        for(const k of keys){
+          const cache=await caches.open(k);
+          const reqs=await cache.keys();
+          for(const r of reqs){ if(/\/raw\//.test(r.url)) await cache.delete(r); }
+        }
+      }catch(_){}
+      rawStatus.textContent="RAW import engine: not installed.";
+      rawEnable.style.display="block"; rawEnable.disabled=false;
+      rawEnable.textContent="Enable RAW import (one-time download, about 2 MB)";
+      rawRemove.style.display="none"; rawRemove.disabled=false;
+      rawRemove.textContent="Remove RAW engine from this device (frees about 2 MB)";
+      toast("RAW engine removed from this device. Your photos, including RAW originals, are untouched.");
+      renderGallery();
+    });
+  }
   // background basic quality checks (on-device, cached per photo)
   const need=originals.filter(p=>!p.analysis);
   if(need.length){
@@ -706,15 +753,32 @@ async function renderGallery(){
 async function importFiles(files){
   const proj=activeProject();
   if(!proj){ toast("Create a project first"); return; }
-  let ok=0, skipped=0;
+  let ok=0, skipped=0, rawNoEngine=0, rawFailed=0, rawOk=0;
   for(const f of files){
     if(!f.size){ skipped++; continue; }
     if(/^image\/(jpeg|png|webp|heic|heif)$/i.test(f.type) || /\.(jpe?g|png|webp|heic|heif)$/i.test(f.name)){
       await idbPut("photos", { id:uid(), projectId:proj.id, name:f.name, blob:f, kind:"original", edits:null, created:Date.now() });
       ok++;
+    } else if(/\.(cr2|cr3|nef|arw|dng)$/i.test(f.name)){
+      if(!rawConsented()){ rawNoEngine++; continue; }
+      try{
+        toast(`Decoding RAW file ${f.name} on this device, large files can take a few seconds…`);
+        const d=await decodeRAW(f);
+        await idbPut("photos", { id:uid(), projectId:proj.id, name:f.name, blob:d.blob, kind:"original", edits:null, created:Date.now(),
+          raw:{ name:f.name, format:(f.name.split(".").pop()||"").toUpperCase(), width:d.width, height:d.height, blob:f } });
+        rawOk++;
+      }catch(e){
+        if(e && (e.name==="QuotaExceededError" || /quota/i.test(e.message||""))) toast("Not enough free storage on this device to keep the RAW original. Nothing was imported or deleted.");
+        else toast(`Could not decode ${f.name}: this RAW variant may be unsupported. Nothing was changed.`);
+        rawFailed++;
+      }
     } else skipped++;
   }
-  toast(skipped? `${ok} imported, ${skipped} skipped (unsupported)` : `${ok} photo${ok===1?"":"s"} imported`);
+  const parts=[`${ok+rawOk} photo${(ok+rawOk)===1?"":"s"} imported`];
+  if(skipped) parts.push(`${skipped} skipped (unsupported)`);
+  if(rawNoEngine) parts.push(`${rawNoEngine} RAW file${rawNoEngine===1?"":"s"} ${rawNoEngine===1?"needs":"need"} the RAW import engine, enable it in Gallery (about 2 MB)`);
+  if(rawFailed) parts.push(`${rawFailed} RAW file${rawFailed===1?"":"s"} could not be decoded`);
+  toast(parts.join(" · "));
   renderGallery(); renderHome();
 }
 
@@ -731,7 +795,7 @@ async function renderEdit(){
   }
   const saved = photo.edits || {preset:"FS Basic", ...PRESETS["FS Basic"], quality:92, scale:100, rot:0, approved:false};
   state.edit = {...saved};
-  $("#edit-sub").textContent = photo.name + " · non-destructive, original untouched";
+  $("#edit-sub").textContent = photo.raw ? photo.raw.name + " · RAW original stored untouched · you are editing its JPEG working copy" : photo.name + " · non-destructive, original untouched";
   const url = await previewURL(photo);
   body.innerHTML = `
     <div class="edit-stage">
@@ -998,6 +1062,27 @@ const AI_MODEL="https://storage.googleapis.com/mediapipe-models/face_detector/bl
 let faceDetector=null, aiLoading=null;
 function aiConsented(){ try{ return localStorage.getItem("fsAI")==="1"; }catch(_){ return false; } }
 function sceneConsented(){ try{ return localStorage.getItem("fsAIScene")==="1"; }catch(_){ return false; } }
+function rawConsented(){ try{ return localStorage.getItem("fsAIRaw")==="1"; }catch(_){ return false; } }
+
+/* ---------- RAW import engine (libraw-wasm, vendored same-origin in ./raw/, cached by the service worker) ---------- */
+let rawLib=null;
+async function decodeRAW(file){
+  if(!rawLib){ const m=await import("./raw/index.js"); rawLib=m.default; }
+  const raw=new rawLib();
+  try{
+    const bytes=new Uint8Array(await file.arrayBuffer());
+    await raw.open(bytes,{halfSize:false,outputBps:8,outputColor:1,useCameraWb:true});
+    let meta={}; try{ meta=await raw.metadata(true)||{}; }catch(_){}
+    const img=await raw.imageData();
+    const n=img.width*img.height, src=img.data, rgba=new Uint8ClampedArray(n*4);
+    for(let i=0,j=0;i<n;i++,j+=3){ rgba[i*4]=src[j]; rgba[i*4+1]=src[j+1]; rgba[i*4+2]=src[j+2]; rgba[i*4+3]=255; }
+    const cv=document.createElement("canvas"); cv.width=img.width; cv.height=img.height;
+    cv.getContext("2d").putImageData(new ImageData(rgba,img.width,img.height),0,0);
+    const blob=await new Promise(r=>cv.toBlob(r,"image/jpeg",0.95));
+    if(!blob) throw new Error("jpeg encode failed");
+    return {blob,width:img.width,height:img.height,meta};
+  } finally { try{ raw.dispose(); }catch(_){} }
+}
 
 /* ---------- Scene grouping engine (experimental, zero-shot MobileCLIP-S0, on-device) ---------- */
 let sceneT=null, sceneTextModel=null, sceneVisionModel=null, sceneTokenizer=null, sceneProcessor=null, sceneTextEmbeds=null, sceneLoading=null;
