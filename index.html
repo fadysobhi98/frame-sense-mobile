@@ -183,7 +183,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Originals are never modified. Editing is non-destructive and exports are new JPEG copies, exactly as the Frame Sense specification requires.</span>
     </div>
-    <footer class="foot">Frame Sense Mobile · v1.2 · Photos stay on this device.<br>Smart Review, Smart Repair and Best Shots run on this device. Planned next: RAW support, AI model packs (face retouch, scene tagging), desktop pairing.</footer>
+    <footer class="foot">Frame Sense Mobile · v1.3 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch. Scene categories (Dance / Party / Hall), RAW support and desktop pairing are still planned.</footer>
   </section>
 
   <!-- PROJECTS -->
@@ -472,7 +472,14 @@ async function renderGallery(){
       <button class="${tab==="originals"?"active":""}" data-tab="originals">Originals (${originals.length})</button>
       <button class="${tab==="exports"?"active":""}" data-tab="exports">Edited (${exports_.length})</button>
     </div>
-    <div class="grid">${shown.map(p=>`<div class="thumb" data-phid="${p.id}"><img src="${URL.createObjectURL(p.blob)}" alt="">${p.kind==="original"?qBadge(p.analysis)+(p.best?` <span class="q-badge" style="background:#d4a857;color:#171310">&#9733; Best Shot</span>`:""):""}</div>`).join("")}</div>
+    ${state.galleryGroup&&tab==="originals" ? (()=>{
+        const grp=[["PORTRAITS (1 PERSON)",p=>p.faces===1],["GROUP SHOTS (2+ PEOPLE)",p=>p.faces>=2],["DETAILS & OTHER (NO FACES)",p=>p.faces==null||p.faces===0]];
+        return grp.map(([label,test])=>{
+          const v=shown.filter(test);
+          if(!v.length) return "";
+          return `<div class="eyebrow" style="margin-top:10px">${label}</div><div class="grid">${v.map(p=>`<div class="thumb" data-phid="${p.id}"><img src="${URL.createObjectURL(p.blob)}" alt="">${qBadge(p.analysis)+(p.best?` <span class="q-badge" style="background:#d4a857;color:#171310">&#9733; Best Shot</span>`:"")}</div>`).join("")}</div>`;
+        }).join("");
+      })() : `<div class="grid">${shown.map(p=>`<div class="thumb" data-phid="${p.id}"><img src="${URL.createObjectURL(p.blob)}" alt="">${p.kind==="original"?qBadge(p.analysis)+(p.best?` <span class="q-badge" style="background:#d4a857;color:#171310">&#9733; Best Shot</span>`:""):""}</div>`).join("")}</div>`}
     ${tab==="originals"&&shown.length?`<div class="note">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Badges are basic exposure/focus checks computed on this device, a small honest subset of the planned AI Smart Review, not full AI analysis.</span>
@@ -486,6 +493,16 @@ async function renderGallery(){
     <div class="note">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Import copies JPEG / PNG / WebP into the app. RAW files (CR2, NEF, ARW...) are not decoded in this mobile v1, they are skipped honestly rather than claimed.</span>
+    </div>
+    <div class="card" id="ai-card">
+      <div class="eyebrow">AI ENGINE · RUNS ON THIS DEVICE</div>
+      <div id="ai-status" class="sub" style="margin-bottom:10px">Face detection engine: not installed.</div>
+      <button class="btn btn-ghost" id="ai-enable">Enable on-device AI (one-time download, about 10 MB)</button>
+      <button class="btn btn-ghost" id="ai-group" style="display:none; margin-top:8px">Group photos by people (AI face detection)</button>
+      <div class="note" style="margin-top:8px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
+        <span>The engine is downloaded once, cached on your device, and works offline after. Photos are analyzed on this phone and are never uploaded anywhere.</span>
+      </div>
     </div>`;
   body.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click", ()=>{
     state.galleryTab=b.dataset.tab; renderGallery();
@@ -521,6 +538,42 @@ async function renderGallery(){
     toast("Best Shots: "+n+" of "+origs.length+" chosen from on-device quality scores");
     renderGallery();
   });
+  // AI Engine card
+  const aiStatus=body.querySelector("#ai-status"), aiEnable=body.querySelector("#ai-enable"), aiGroup=body.querySelector("#ai-group");
+  if(aiEnable){
+    if(aiConsented()){
+      aiStatus.textContent="Face detection engine: approved. It loads on first use, no extra downloads after.";
+      aiEnable.style.display="none"; aiGroup.style.display="block";
+    }
+    aiEnable.addEventListener("click", async ()=>{
+      aiEnable.disabled=true; aiEnable.textContent="Downloading AI engine (about 10 MB, one time)…";
+      try{
+        await ensureAI();
+        try{ localStorage.setItem("fsAI","1"); }catch(_){}
+        aiStatus.textContent="Face detection engine: ready on this device (works offline now).";
+        aiEnable.style.display="none"; aiGroup.style.display="block";
+        toast("AI engine ready. Photos are analyzed on this device only.");
+      }catch(e){
+        aiEnable.disabled=false; aiEnable.textContent="Enable on-device AI (one-time download, about 10 MB)";
+        toast("AI download failed. Check the connection and try again.");
+      }
+    });
+    aiGroup.addEventListener("click", async ()=>{
+      const origs=(await idbAll("photos")).filter(x=>x.projectId===proj.id && x.kind==="original");
+      if(!origs.length){ toast("Import photos first"); return; }
+      aiGroup.disabled=true; aiGroup.textContent="Detecting faces on this device…";
+      try{
+        await ensureAI();
+        for(const p of origs){
+          if(p.faces==null){ p.faces = await countFaces(p); await idbPut("photos", p); }
+        }
+        state.galleryGroup = !state.galleryGroup;
+        renderGallery();
+      }catch(e){ toast("Face detection failed on this device"); }
+      aiGroup.disabled=false;
+      aiGroup.textContent = state.galleryGroup ? "Ungroup photos" : "Group photos by people (AI face detection)";
+    });
+  }
   // background basic quality checks (on-device, cached per photo)
   const need=originals.filter(p=>!p.analysis);
   if(need.length){
@@ -573,6 +626,7 @@ async function renderEdit(){
     <div class="eyebrow">SESSION TONE</div>
     <div class="presets" id="presets"></div>
     <button class="btn btn-ghost" id="smart-repair" style="margin-bottom:12px">Smart Repair · auto fix from this photo&#39;s own analysis (on this device)</button>
+    <button class="btn btn-ghost" id="face-retouch" style="margin-bottom:12px">AI Face Retouch · smooth skin on detected faces, save as a new edited copy</button>
     <div class="card">
       <div class="eyebrow">FINE-TUNING</div>
       ${sliderRow("Brightness","b",0.5,1.5,0.01)}
@@ -644,6 +698,55 @@ async function renderEdit(){
     Object.assign(state.edit,{preset:"Smart Repair",b:+bFix.toFixed(2),c:+cFix.toFixed(2),w:+wFix.toFixed(3)});
     syncSliders(); applyPreview(); persistEdits(photo);
     toast("Smart Repair applied from on-device analysis. Adjust or export when ready.");
+  });
+  $("#face-retouch").addEventListener("click", async ()=>{
+    const btnR=$("#face-retouch");
+    if(!aiConsented()){
+      btnR.textContent="Enable the AI engine in Gallery first (one-time 10 MB download)";
+      setTimeout(()=>{ btnR.textContent="AI Face Retouch · smooth skin on detected faces, save as a new edited copy"; }, 3200);
+      return;
+    }
+    btnR.disabled=true; btnR.textContent="Detecting faces on this device…";
+    try{
+      await ensureAI();
+      const img=await loadImage(photo.blob);
+      const cap=1600;
+      const sc=Math.min(1, cap/Math.max(img.naturalWidth,img.naturalHeight));
+      const W=Math.round(img.naturalWidth*sc), H=Math.round(img.naturalHeight*sc);
+      const c=document.createElement("canvas"); c.width=W; c.height=H;
+      const x=c.getContext("2d"); x.drawImage(img,0,0,W,H);
+      const det=await faceDetector.detect(c);
+      const faces=(det&&det.detections)||[];
+      if(!faces.length){
+        toast("No faces detected in this photo");
+        btnR.disabled=false; btnR.textContent="AI Face Retouch · smooth skin on detected faces, save as a new edited copy";
+        return;
+      }
+      btnR.textContent="Retouching "+faces.length+" face"+(faces.length===1?"":"s")+"…";
+      for(const f of faces){
+        const bb=f.boundingBox;
+        const bx=Math.max(0,Math.round(bb.originX-bb.width*0.12)), by=Math.max(0,Math.round(bb.originY-bb.height*0.12));
+        const bw=Math.min(W-bx,Math.round(bb.width*1.24)), bh=Math.min(H-by,Math.round(bb.height*1.24));
+        smoothSkin(x, bx, by, bw, bh);
+      }
+      const c2=document.createElement("canvas");
+      const rot=state.edit.rot||0, scale=(state.edit.scale||100)/100;
+      const swap=rot===90||rot===270;
+      c2.width=Math.max(1,Math.round((swap?H:W)*scale));
+      c2.height=Math.max(1,Math.round((swap?W:H)*scale));
+      const x2=c2.getContext("2d");
+      x2.filter=filterString(state.edit);
+      x2.translate(c2.width/2,c2.height/2); x2.rotate(rot*Math.PI/180); x2.scale(scale,scale);
+      x2.drawImage(c,-W/2,-H/2);
+      const q=Math.min(100,Math.max(50,state.edit.quality))/100;
+      const blob=await new Promise(res=>c2.toBlob(res,"image/jpeg",q));
+      await idbPut("photos",{ id:uid(), projectId:photo.projectId, kind:"export", parentId:photo.id,
+        name:photo.name.replace(/\.[^.]+$/,"")+"_retouched.jpg", blob, created:Date.now() });
+      toast("AI retouch done on "+faces.length+" face"+(faces.length===1?"":"s")+". Saved as a new edited copy; original untouched.");
+    }catch(e){
+      toast("AI retouch failed on this device");
+    }
+    btnR.disabled=false; btnR.textContent="AI Face Retouch · smooth skin on detected faces, save as a new edited copy";
   });
   const q=$("#sl-q");
   q.addEventListener("input", ()=>{ state.edit.quality=parseInt(q.value,10); $("#out-q").textContent=q.value+"%"; persistEdits(photo); });
@@ -763,6 +866,59 @@ async function previewURL(photo){
   x.rotate(rot*Math.PI/180);
   x.drawImage(img,-img.naturalWidth/2,-img.naturalHeight/2);
   return c.toDataURL("image/jpeg",0.9);
+}
+/* ---------- on-device AI engine (MediaPipe BlazeFace via CDN, cached by the service worker) ---------- */
+const AI_BUNDLE="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+const AI_WASM="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
+const AI_MODEL="https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
+let faceDetector=null, aiLoading=null;
+function aiConsented(){ try{ return localStorage.getItem("fsAI")==="1"; }catch(_){ return false; } }
+async function ensureAI(){
+  if(faceDetector) return faceDetector;
+  if(aiLoading) return aiLoading;
+  aiLoading=(async()=>{
+    const v=await import(AI_BUNDLE);
+    const fileset=await v.FilesetResolver.forVisionTasks(AI_WASM);
+    faceDetector=await v.FaceDetector.createFromOptions(fileset,{
+      baseOptions:{modelAssetPath:AI_MODEL}, runningMode:"IMAGE"
+    });
+    return faceDetector;
+  })();
+  try{ return await aiLoading; } finally{ aiLoading=null; }
+}
+async function countFaces(photo){
+  try{
+    const img=await loadImage(photo.blob);
+    const cap=960;
+    const sc=Math.min(1, cap/Math.max(img.naturalWidth,img.naturalHeight));
+    const c=document.createElement("canvas");
+    c.width=Math.max(1,Math.round(img.naturalWidth*sc));
+    c.height=Math.max(1,Math.round(img.naturalHeight*sc));
+    c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+    const det=await faceDetector.detect(c);
+    return ((det&&det.detections)||[]).length;
+  }catch(_){ return 0; }
+}
+function smoothSkin(ctx, bx, by, bw, bh){
+  if(bw<8||bh<8) return;
+  const region=ctx.getImageData(bx,by,bw,bh);
+  const bc=document.createElement("canvas"); bc.width=bw; bc.height=bh;
+  const bx2=bc.getContext("2d");
+  bx2.filter="blur(3px)";
+  bx2.drawImage(ctx.canvas, bx,by,bw,bh, 0,0,bw,bh);
+  const blur=bx2.getImageData(0,0,bw,bh);
+  const d=region.data, b=blur.data;
+  for(let i=0;i<d.length;i+=4){
+    const r=d[i], g=d[i+1], bl=d[i+2];
+    const cb=128 - 0.168736*r - 0.331264*g + 0.5*bl;
+    const cr=128 + 0.5*r - 0.418688*g - 0.081312*bl;
+    if(cb>=77 && cb<=127 && cr>=133 && cr<=173){
+      d[i]  = Math.round(d[i]*0.35  + b[i]*0.65);
+      d[i+1]= Math.round(d[i+1]*0.35+ b[i+1]*0.65);
+      d[i+2]= Math.round(d[i+2]*0.35+ b[i+2]*0.65);
+    }
+  }
+  ctx.putImageData(region,bx,by);
 }
 async function analyzePhoto(photo){
   try{
@@ -884,4 +1040,4 @@ window.addEventListener("DOMContentLoaded", async ()=>{
   </div>
 </div>
 </body>
-</html>
+  </html>
