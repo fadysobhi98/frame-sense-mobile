@@ -1,6 +1,6 @@
 /* Frame Sense service worker: app-shell cache so the app opens offline.
    Photos and projects live in IndexedDB on the device, not in this cache. */
-const CACHE = "framesense-v1.5.1";
+const CACHE = "framesense-v1.5.2";
 /* AI engine files (mediapipe bundle/wasm/model, ~10 MB) live in a separate cache
    that survives app-shell updates, so users keep the engine they approved. */
 const AI_CACHE = "framesense-ai";
@@ -13,8 +13,13 @@ const ASSETS = [
 ];
 
 self.addEventListener("install", (event) => {
+  // bypass HTTP cache: a stale cached shell must never poison a new version's cache
   event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())
+    caches.open(CACHE)
+      .then((cache) => Promise.all(ASSETS.map((a) =>
+        fetch(a, { cache: "no-cache" }).then((r) => cache.put(a, r))
+      )))
+      .then(() => self.skipWaiting())
   );
 });
 
@@ -29,6 +34,18 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const bucket = /mediapipe|tasks-vision|googleapis|huggingface|hf\.co|onnxruntime|jsdelivr/.test(event.request.url) ? AI_CACHE : CACHE;
+  // app shell (navigations / html): network-first so updates actually reach users, cache as offline fallback
+  const isShell = event.request.mode === "navigate" || /\/(index\.html)?$/.test(new URL(event.request.url).pathname);
+  if (isShell) {
+    event.respondWith(
+      fetch(event.request).then((response) => {
+        const copy = response.clone();
+        caches.open(CACHE).then((cache) => cache.put("./index.html", copy));
+        return response;
+      }).catch(() => caches.match("./index.html"))
+    );
+    return;
+  }
   event.respondWith(
     caches.open(bucket).then((cache) =>
       cache.match(event.request).then((cached) => {
