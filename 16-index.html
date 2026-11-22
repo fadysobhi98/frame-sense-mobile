@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#100d0b">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Frame Sense</title>
+<style>
+:root{
+  --bg:#100d0b; --panel:#1a1512; --panel2:#221b16; --line:#332a22;
+  --gold:#d4a857; --gold2:#b8894a; --copper:#c97b4a;
+  --text:#f0e8df; --muted:#a89784; --ok:#7fc98a; --warn:#e0b45c; --err:#e07a6a;
+  --radius:16px;
+}
+*{box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{
+  background:var(--bg); color:var(--text);
+  font-family:"DM Sans","Segoe UI",system-ui,sans-serif;
+  display:flex; flex-direction:column; overflow:hidden;
+}
+header{
+  padding:14px 18px 10px; display:flex; align-items:center; gap:12px;
+  border-bottom:1px solid var(--line); background:var(--bg); flex:0 0 auto;
+}
+.brand-mark{
+  width:42px; height:42px; border-radius:12px; flex:0 0 auto;
+  background:radial-gradient(circle at 30% 25%, #3a2f24, #171310 70%);
+  border:1.5px solid var(--gold); display:flex; align-items:center; justify-content:center;
+  box-shadow:0 0 14px rgba(212,168,87,.25);
+}
+.brand-mark svg{width:26px;height:26px}
+.brand-text strong{display:block; font-size:15px; letter-spacing:2.5px; font-weight:800}
+.brand-text small{display:block; font-size:9.5px; letter-spacing:2px; color:var(--gold); font-weight:600}
+main{flex:1 1 auto; overflow-y:auto; padding:16px 16px 90px; -webkit-overflow-scrolling:touch}
+.view{display:none; animation:fade .18s ease}
+.view.active{display:block}
+@keyframes fade{from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:none}}
+h1{font-size:22px; font-weight:800; margin-bottom:4px}
+.sub{color:var(--muted); font-size:13px; margin-bottom:16px}
+.eyebrow{font-size:10px; letter-spacing:2px; color:var(--gold); font-weight:700; margin-bottom:6px}
+nav{
+  position:fixed; left:0; right:0; bottom:0; z-index:30;
+  display:flex; background:rgba(20,16,12,.96); border-top:1px solid var(--line);
+  padding:6px 4px calc(6px + env(safe-area-inset-bottom));
+}
+nav button{
+  flex:1; background:none; border:0; color:var(--muted); font-family:inherit;
+  display:flex; flex-direction:column; align-items:center; gap:3px;
+  font-size:10px; font-weight:600; letter-spacing:.4px; padding:6px 0; cursor:pointer;
+}
+nav button svg{width:21px; height:21px}
+nav button.active{color:var(--gold)}
+.card{
+  background:linear-gradient(160deg, var(--panel), var(--panel2));
+  border:1px solid var(--line); border-radius:var(--radius);
+  padding:16px; margin-bottom:14px;
+}
+.hero{
+  background:radial-gradient(120% 160% at 85% -10%, rgba(212,168,87,.22), transparent 55%),
+             linear-gradient(160deg,#241c15,#171310);
+}
+.hero h2{font-size:20px; font-weight:800; line-height:1.25; margin-bottom:6px}
+.hero p{color:var(--muted); font-size:13px; line-height:1.5}
+.pill{display:inline-flex; align-items:center; gap:6px; font-size:10px; letter-spacing:1.2px;
+  color:var(--gold); border:1px solid var(--gold2); border-radius:999px; padding:4px 10px; margin-bottom:10px; font-weight:700}
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  border:0; border-radius:12px; padding:12px 18px; font-family:inherit;
+  font-size:14px; font-weight:700; cursor:pointer; width:100%;
+}
+.btn-gold{background:linear-gradient(135deg, var(--gold), var(--gold2)); color:#171310}
+.btn-ghost{background:var(--panel2); color:var(--text); border:1px solid var(--line)}
+.btn:disabled{opacity:.45}
+.btn svg{width:16px;height:16px}
+label{display:block; font-size:12px; color:var(--muted); margin:12px 0 5px; font-weight:600}
+input[type=text],input[type=date],select{
+  width:100%; background:#120e0a; border:1px solid var(--line); border-radius:10px;
+  color:var(--text); padding:11px 12px; font-family:inherit; font-size:14px; outline:none;
+}
+input:focus,select:focus{border-color:var(--gold2)}
+.proj-row{
+  display:flex; align-items:center; gap:12px; padding:13px 14px;
+  background:var(--panel2); border:1px solid var(--line); border-radius:12px; margin-bottom:10px; cursor:pointer;
+}
+.proj-row.active-proj{border-color:var(--gold)}
+.proj-ico{width:38px;height:38px;border-radius:10px;background:#2b2119;display:flex;align-items:center;justify-content:center;color:var(--gold);flex:0 0 auto}
+.proj-ico svg{width:18px;height:18px}
+.proj-row strong{display:block;font-size:14px}
+.proj-row small{color:var(--muted);font-size:11.5px}
+.badge{font-size:9.5px; letter-spacing:1px; font-weight:700; padding:3px 8px; border-radius:999px; margin-left:auto}
+.badge.on{background:rgba(127,201,138,.15); color:var(--ok); border:1px solid rgba(127,201,138,.4)}
+.badge.off{background:rgba(168,151,132,.1); color:var(--muted); border:1px solid var(--line)}
+.grid{display:grid; grid-template-columns:repeat(3,1fr); gap:6px}
+.thumb{aspect-ratio:1; border-radius:10px; overflow:hidden; background:#0c0908; border:1px solid var(--line); cursor:pointer; position:relative}
+.thumb img{width:100%; height:100%; object-fit:cover; display:block}
+.q-badge{
+  position:absolute; left:4px; bottom:4px; font-size:9px; font-weight:800; letter-spacing:.4px;
+  padding:2px 6px; border-radius:999px; background:rgba(16,13,11,.85); border:1px solid var(--line); color:var(--muted);
+}
+.q-badge.warn{color:var(--warn); border-color:rgba(224,180,92,.5)}
+.q-badge.ok{color:var(--ok); border-color:rgba(127,201,138,.45)}
+.tabs{display:flex; gap:8px; margin-bottom:14px}
+.tabs button{
+  flex:1; background:var(--panel2); border:1px solid var(--line); color:var(--muted);
+  border-radius:999px; padding:8px; font-family:inherit; font-size:12px; font-weight:700; cursor:pointer;
+}
+.tabs button.active{color:#171310; background:linear-gradient(135deg,var(--gold),var(--gold2)); border:0}
+.empty{text-align:center; color:var(--muted); padding:34px 10px; font-size:13px; line-height:1.6}
+.empty svg{width:34px;height:34px;color:var(--gold2);margin-bottom:8px}
+.note{
+  display:flex; gap:9px; align-items:flex-start; font-size:11.5px; color:var(--muted);
+  background:rgba(212,168,87,.07); border:1px solid rgba(212,168,87,.25);
+  border-radius:10px; padding:10px 12px; margin:12px 0; line-height:1.5;
+}
+.note svg{width:15px;height:15px;flex:0 0 auto;color:var(--gold);margin-top:1px}
+/* Edit view */
+.edit-stage{position:relative; border-radius:14px; overflow:hidden; background:#0c0908; border:1px solid var(--line); margin-bottom:12px}
+.edit-stage img{width:100%; display:block; max-height:52vh; object-fit:contain; background:#0c0908}
+.hold-compare{
+  position:absolute; right:10px; bottom:10px; background:rgba(16,13,11,.85); color:var(--gold);
+  border:1px solid var(--gold2); border-radius:999px; padding:7px 14px; font-size:11px; font-weight:700;
+  letter-spacing:.6px; font-family:inherit; cursor:pointer; user-select:none; touch-action:none;
+}
+.presets{display:flex; gap:8px; overflow-x:auto; padding:2px 0 8px; scrollbar-width:none}
+.presets::-webkit-scrollbar{display:none}
+.preset{
+  flex:0 0 auto; border:1px solid var(--line); background:var(--panel2); color:var(--muted);
+  border-radius:12px; padding:9px 13px; font-family:inherit; font-size:12px; font-weight:700; cursor:pointer;
+}
+.preset.active{border-color:var(--gold); color:var(--gold)}
+.preset small{display:block; font-weight:500; font-size:9.5px; opacity:.75}
+.slider-row{display:flex; align-items:center; gap:10px; margin:10px 0}
+.slider-row span{font-size:12px; color:var(--muted); width:82px; font-weight:600}
+.slider-row output{font-size:11px; color:var(--gold); width:36px; text-align:right; font-weight:700}
+input[type=range]{flex:1; accent-color:var(--gold); height:26px}
+.row2{display:flex; gap:10px}
+.row2 .btn{width:auto; flex:1}
+.section-title{font-size:13px; font-weight:800; letter-spacing:.5px; margin:18px 0 10px; display:flex; align-items:center; gap:8px}
+.section-title svg{width:15px;height:15px;color:var(--gold)}
+.planned-list li{
+  list-style:none; display:flex; gap:10px; align-items:center; padding:10px 2px;
+  border-bottom:1px solid var(--line); font-size:13px; color:var(--muted);
+}
+.planned-list li b{color:var(--text); font-weight:700}
+.status-dot{width:7px;height:7px;border-radius:50%;background:var(--warn);flex:0 0 auto}
+footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:18px; line-height:1.7}
+.toast{
+  position:fixed; left:16px; right:16px; bottom:86px; z-index:40; text-align:center;
+  background:#241c15; border:1px solid var(--gold2); color:var(--text);
+  border-radius:12px; padding:12px; font-size:13px; font-weight:600;
+  box-shadow:0 8px 28px rgba(0,0,0,.5); display:none;
+}
+.toast.show{display:block; animation:fade .2s ease}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand-mark">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#d4a857" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="9"/>
+      <path d="M12 3 L12 12 L19.5 7.5 M12 12 L4.5 16.5 M12 12 L12 21" opacity=".85"/>
+    </svg>
+  </div>
+  <div class="brand-text"><strong>FRAME SENSE</strong><small>AI PHOTOGRAPHY SUITE · MOBILE</small></div>
+</header>
+
+<main>
+  <!-- HOME -->
+  <section class="view active" id="view-home">
+    <div class="card hero">
+      <div class="pill">LOCAL-FIRST · V1</div>
+      <h2 id="home-greet">Hello, Photographer</h2>
+      <p>Your wedding &amp; event workflow on the phone. Import photos, shape the tone, export JPEG, all stored on this device.</p>
+    </div>
+    <div class="section-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 12l9 4 9-4M3 17l9 4 9-4"/></svg>Your projects</div>
+    <div id="home-projects"></div>
+    <button class="btn btn-gold" id="home-new-project">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      New project
+    </button>
+    <div class="note">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+      <span>Originals are never modified. Editing is non-destructive and exports are new JPEG copies, exactly as the Frame Sense specification requires.</span>
+    </div>
+    <footer class="foot">Frame Sense Mobile · v1.1 · Photos stay on this device.<br>Planned next: RAW support, local AI classification, desktop pairing.</footer>
+  </section>
+
+  <!-- PROJECTS -->
+  <section class="view" id="view-projects">
+    <h1>Projects</h1>
+    <div class="sub">Client · Event · Date. Only one project is active at a time.</div>
+    <div id="projects-list"></div>
+    <div id="proj-del-wrap" style="display:none; margin-bottom:14px">
+      <button class="btn btn-ghost" id="proj-del">Delete active project</button>
+      <p class="field-note" style="margin-top:8px" id="proj-del-note"></p>
+    </div>
+    <div class="card">
+      <div class="eyebrow">NEW PROJECT</div>
+      <label>Client name</label>
+      <input type="text" id="p-client" placeholder="e.g. Ahmed &amp; Sara">
+      <label>Event type</label>
+      <input type="text" id="p-type" placeholder="Wedding" value="Wedding">
+      <label>Event date</label>
+      <input type="date" id="p-date">
+      <div style="height:14px"></div>
+      <button class="btn btn-gold" id="p-create">Create project</button>
+    </div>
+  </section>
+
+  <!-- GALLERY -->
+  <section class="view" id="view-gallery">
+    <h1>Gallery</h1>
+    <div class="sub" id="gallery-sub">Select a project to view its photos.</div>
+    <div id="gallery-body"></div>
+  </section>
+
+  <!-- EDIT -->
+  <section class="view" id="view-edit">
+    <h1>Edit</h1>
+    <div class="sub" id="edit-sub">Open a photo from the Gallery to edit it.</div>
+    <div id="edit-body"></div>
+  </section>
+
+  <!-- DEVICES -->
+  <section class="view" id="view-devices">
+    <h1>Devices</h1>
+    <div class="sub">Pairing with Frame Sense Desktop.</div>
+    <div class="card">
+      <div class="eyebrow">PLANNED — NOT IN V1</div>
+      <ul class="planned-list">
+        <li><span class="status-dot"></span><span><b>QR pairing</b> with the desktop app</span></li>
+        <li><span class="status-dot"></span><span><b>Encrypted transfer</b> of JPEG / RAW between devices</span></li>
+        <li><span class="status-dot"></span><span><b>Remote gallery</b> browsing of desktop previews</span></li>
+        <li><span class="status-dot"></span><span><b>Device roles</b> Owner / Operator / Viewer</span></li>
+      </ul>
+      <div class="note">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
+        <span>Needs the desktop app running to pair against. Photos stay local on each device, per the specification.</span>
+      </div>
+    </div>
+  </section>
+</main>
+
+<nav>
+  <button data-view="home" class="active">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5L12 3l9 7.5V20a1 1 0 01-1 1h-5v-6h-6v6H4a1 1 0 01-1-1z"/></svg>
+    Home</button>
+  <button data-view="projects">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 3h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+    Projects</button>
+  <button data-view="gallery">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/></svg>
+    Gallery</button>
+  <button data-view="edit">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h16M4 16h16"/><circle cx="9" cy="8" r="2.2"/><circle cx="15" cy="16" r="2.2"/></svg>
+    Edit</button>
+  <button data-view="devices">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>
+    Devices</button>
+</nav>
+
+<div class="toast" id="toast"></div>
+<input type="file" id="file-input" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" multiple style="display:none">
+
+<script>
+"use strict";
+/* ---------- storage ---------- */
+const DB_NAME = "framesense-mobile";
+let db = null;
+const mem = {projects:new Map(), photos:new Map()};
+let storageMode = "device";
+function openDB(){
+  return new Promise(res=>{
+    let settled=false;
+    const done=()=>{ if(!settled){ settled=true; res(); } };
+    try{
+      if(!window.indexedDB){ storageMode="session"; return done(); }
+      const r = indexedDB.open(DB_NAME, 1);
+      r.onupgradeneeded = e=>{
+        const d = e.target.result;
+        d.createObjectStore("projects", {keyPath:"id"});
+        const ph = d.createObjectStore("photos", {keyPath:"id"});
+        ph.createIndex("projectId", "projectId", {unique:false});
+      };
+      r.onsuccess = e=>{
+        if(storageMode==="session"){ try{ e.target.result.close(); }catch(_){} }
+        else { db = e.target.result; }
+        done();
+      };
+      r.onerror = ()=>{ storageMode="session"; done(); };
+      r.onblocked = ()=>{ storageMode="session"; done(); };
+      setTimeout(()=>{ if(!db){ storageMode="session"; done(); } }, 2500);
+    }catch(_){ storageMode="session"; done(); }
+  });
+}
+function tx(store, mode){ return db.transaction(store, mode).objectStore(store); }
+function idbPut(store, val){
+  if(!db){ mem[store].set(val.id, val); return Promise.resolve(); }
+  return new Promise((res,rej)=>{ const q=tx(store,"readwrite").put(val); q.onsuccess=()=>res(); q.onerror=e=>rej(e); });
+}
+function idbGet(store, key){
+  if(!db) return Promise.resolve(mem[store].get(key));
+  return new Promise((res,rej)=>{ const q=tx(store,"readonly").get(key); q.onsuccess=()=>res(q.result); q.onerror=e=>rej(e); });
+}
+function idbAll(store){
+  if(!db) return Promise.resolve([...mem[store].values()]);
+  return new Promise((res,rej)=>{ const q=tx(store,"readonly").getAll(); q.onsuccess=()=>res(q.result||[]); q.onerror=e=>rej(e); });
+}
+function idbDel(store, key){
+  if(!db){ mem[store].delete(key); return Promise.resolve(); }
+  return new Promise((res,rej)=>{ const q=tx(store,"readwrite").delete(key); q.onsuccess=()=>res(); q.onerror=e=>rej(e); });
+}
+const uid = ()=> Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+
+/* ---------- state ---------- */
+const state = { projects:[], activeProjectId:null, editPhotoId:null, edit:null, galleryTab:"originals" };
+
+const PRESETS = {
+  "FS Basic":  {b:1.02, c:1.06, s:1.08, w:0.04, note:"Approved baseline"},
+  "Natural":   {b:1.00, c:1.00, s:1.00, w:0.00, note:"Example"},
+  "Warm":      {b:1.03, c:1.04, s:1.12, w:0.16, note:"Example"},
+  "Cinematic": {b:0.99, c:1.14, s:0.92, w:0.06, note:"Example"},
+  "Moody":     {b:0.95, c:1.18, s:0.85, w:0.03, note:"Example"}
+};
+
+/* ---------- helpers ---------- */
+const $ = s=>document.querySelector(s);
+function toast(msg){
+  const t=$("#toast"); t.textContent=msg; t.classList.add("show");
+  clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove("show"), 2600);
+}
+function filterString(e){
+  return `brightness(${e.b.toFixed(3)}) contrast(${e.c.toFixed(3)}) saturate(${e.s.toFixed(3)}) sepia(${e.w.toFixed(3)})`;
+}
+function fmtDate(d){ try{ return new Date(d+"T00:00:00").toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"}); }catch(_){ return d; } }
+
+/* ---------- navigation ---------- */
+document.querySelectorAll("nav button").forEach(btn=>{
+  btn.addEventListener("click", ()=>{
+    document.querySelectorAll("nav button").forEach(b=>b.classList.remove("active"));
+    btn.classList.add("active");
+    showView(btn.dataset.view);
+  });
+});
+function showView(name){
+  document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));
+  $("#view-"+name).classList.add("active");
+  if(name==="home") renderHome();
+  if(name==="projects") renderProjects();
+  if(name==="gallery") renderGallery();
+  if(name==="edit") renderEdit();
+}
+
+/* ---------- projects ---------- */
+async function loadProjects(){
+  state.projects = (await idbAll("projects")).sort((a,b)=>b.created-a.created);
+  if(!state.activeProjectId && state.projects.length) state.activeProjectId = state.projects[0].id;
+}
+function activeProject(){ return state.projects.find(p=>p.id===state.activeProjectId) || null; }
+function projectName(c,t,d){ return `${c} - ${t} - ${d}`; }
+
+async function createProject(){
+  const client=$("#p-client").value.trim(), type=$("#p-type").value.trim()||"Wedding", date=$("#p-date").value;
+  if(!client || !date){ toast("Enter client name and event date"); return; }
+  const proj={ id:uid(), name:projectName(client,type,date), client, type, date, created:Date.now() };
+  await idbPut("projects", proj);
+  state.activeProjectId = proj.id;
+  $("#p-client").value="";
+  toast("Project created: "+proj.name);
+  await loadProjects(); renderProjects(); renderHome();
+}
+
+/* ---------- home ---------- */
+async function renderHome(){
+  const wrap=$("#home-projects");
+  if(!state.projects.length){
+    wrap.innerHTML = `<div class="empty">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7a2 2 0 012-2h4l2 3h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+      <br>No projects yet.<br>Create one to start a wedding or event workflow.</div>`;
+    return;
+  }
+  const photos = await idbAll("photos");
+  const parts = [];
+  for(const p of state.projects.slice(0,5)){
+    const count = photos.filter(x=>x.projectId===p.id && x.kind==="original").length;
+    const on = p.id===state.activeProjectId;
+    parts.push(`<div class="proj-row ${on?"active-proj":""}" data-pid="${p.id}">
+      <div class="proj-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3.2"/><path d="M4 7h3l2-2.5h6L17 7h3a1 1 0 011 1v10a1 1 0 01-1 1H4a1 1 0 01-1-1V8a1 1 0 011-1z"/></svg></div>
+      <div><strong>${esc(p.name)}</strong><small>${count} photo${count===1?"":"s"} · ${fmtDate(p.date)}</small></div>
+      <span class="badge ${on?"on":"off"}">${on?"ACTIVE":"TAP TO SET"}</span></div>`);
+  }
+  wrap.innerHTML = parts.join("");
+  wrap.querySelectorAll(".proj-row").forEach(el=>el.addEventListener("click", ()=>{
+    state.activeProjectId = el.dataset.pid; renderHome();
+  }));
+}
+
+/* ---------- projects view ---------- */
+async function renderProjects(){
+  const list=$("#projects-list");
+  const photos = await idbAll("photos");
+  if(!state.projects.length){
+    list.innerHTML = `<div class="empty">No projects yet. Create your first one below.</div>`;
+  } else {
+    list.innerHTML = state.projects.map(p=>{
+      const count = photos.filter(x=>x.projectId===p.id && x.kind==="original").length;
+      const on = p.id===state.activeProjectId;
+      return `<div class="proj-row ${on?"active-proj":""}" data-pid="${p.id}">
+        <div class="proj-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3.2"/><path d="M4 7h3l2-2.5h6L17 7h3a1 1 0 011 1v10a1 1 0 01-1 1H4a1 1 0 01-1-1V8a1 1 0 011-1z"/></svg></div>
+        <div><strong>${esc(p.name)}</strong><small>${count} photos</small></div>
+        <span class="badge ${on?"on":"off"}">${on?"ACTIVE":"SET"}</span></div>`;
+    }).join("");
+    list.querySelectorAll(".proj-row").forEach(el=>el.addEventListener("click", ()=>{
+      state.activeProjectId = el.dataset.pid;
+      toast("Active project set"); renderProjects(); renderHome();
+    }));
+  }
+  // delete active project, two-tap confirm
+  const delWrap=$("#proj-del-wrap");
+  if(state.projects.length && delWrap){
+    delWrap.style.display="block";
+    const delB=$("#proj-del"), delN=$("#proj-del-note");
+    delB.dataset.arm=""; delN.textContent="";
+    delB.onclick=async ()=>{
+      const proj=activeProject();
+      if(!proj) return;
+      if(delB.dataset.arm!=="1"){
+        delB.dataset.arm="1";
+        delN.textContent="Tap again to delete \""+proj.name+"\" and its photos inside the app. Photos in your phone gallery are not touched.";
+        return;
+      }
+      const ph=(await idbAll("photos")).filter(p=>p.projectId===proj.id);
+      for(const p of ph) await idbDel("photos", p.id);
+      await idbDel("projects", proj.id);
+      state.activeProjectId=null; state.editPhotoId=null;
+      await loadProjects();
+      toast("Project deleted");
+      renderProjects(); renderHome();
+    };
+  } else if(delWrap){ delWrap.style.display="none"; }
+}
+
+/* ---------- gallery ---------- */
+async function renderGallery(){
+  const body=$("#gallery-body");
+  const proj=activeProject();
+  if(!proj){
+    $("#gallery-sub").textContent="Select a project to view its photos.";
+    body.innerHTML=`<div class="empty">Create or select a project first.</div>`;
+    return;
+  }
+  $("#gallery-sub").textContent = proj.name;
+  const all = (await idbAll("photos")).filter(x=>x.projectId===proj.id);
+  const originals = all.filter(x=>x.kind==="original");
+  const exports_ = all.filter(x=>x.kind==="export");
+  const tab = state.galleryTab;
+  const shown = tab==="originals" ? originals : exports_;
+  body.innerHTML = `
+    <div class="tabs">
+      <button class="${tab==="originals"?"active":""}" data-tab="originals">Originals (${originals.length})</button>
+      <button class="${tab==="exports"?"active":""}" data-tab="exports">Edited (${exports_.length})</button>
+    </div>
+    <div class="grid">${shown.map(p=>`<div class="thumb" data-phid="${p.id}"><img src="${URL.createObjectURL(p.blob)}" alt="">${p.kind==="original"?qBadge(p.analysis):""}</div>`).join("")}</div>
+    ${tab==="originals"&&shown.length?`<div class="note">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+      <span>Badges are basic exposure/focus checks computed on this device, a small honest subset of the planned AI Smart Review, not full AI analysis.</span>
+    </div>`:""}
+    ${shown.length===0 ? `<div class="empty">${tab==="originals" ? "No photos yet. Import from your device below." : "No edited exports yet. Edit a photo and export it."}</div>` : ""}
+    <div style="height:12px"></div>
+    <button class="btn btn-gold" id="g-import">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M6 10l6-6 6 6"/><path d="M4 20h16"/></svg>
+      Import photos</button>
+    <div class="note">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+      <span>Import copies JPEG / PNG / WebP into the app. RAW files (CR2, NEF, ARW...) are not decoded in this mobile v1, they are skipped honestly rather than claimed.</span>
+    </div>`;
+  body.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click", ()=>{
+    state.galleryTab=b.dataset.tab; renderGallery();
+  }));
+  body.querySelectorAll(".thumb").forEach(t=>t.addEventListener("click", ()=>{
+    state.editPhotoId = t.dataset.phid;
+    document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("active", b.dataset.view==="edit"));
+    showView("edit");
+  }));
+  const imp = body.querySelector("#g-import");
+  if(imp) imp.addEventListener("click", ()=>$("#file-input").click());
+  // background basic quality checks (on-device, cached per photo)
+  const need=originals.filter(p=>!p.analysis);
+  if(need.length){
+    (async ()=>{
+      let changed=false;
+      for(const p of need.slice(0,30)){
+        const a=await analyzePhoto(p);
+        if(a){ p.analysis=a; await idbPut("photos", p); changed=true; }
+      }
+      if(changed && document.querySelector("#view-gallery").classList.contains("active")) renderGallery();
+    })();
+  }
+}
+
+async function importFiles(files){
+  const proj=activeProject();
+  if(!proj){ toast("Create a project first"); return; }
+  let ok=0, skipped=0;
+  for(const f of files){
+    if(/^image\/(jpeg|png|webp|heic|heif)$/i.test(f.type) || /\.(jpe?g|png|webp|heic|heif)$/i.test(f.name)){
+      await idbPut("photos", { id:uid(), projectId:proj.id, name:f.name, blob:f, kind:"original", edits:null, created:Date.now() });
+      ok++;
+    } else skipped++;
+  }
+  toast(skipped? `${ok} imported, ${skipped} skipped (unsupported)` : `${ok} photo${ok===1?"":"s"} imported`);
+  renderGallery(); renderHome();
+}
+
+/* ---------- edit ---------- */
+async function renderEdit(){
+  const body=$("#edit-body");
+  const photo = state.editPhotoId ? await idbGet("photos", state.editPhotoId) : null;
+  if(!photo || photo.kind!=="original"){
+    $("#edit-sub").textContent = "Open a photo from the Gallery to edit it.";
+    body.innerHTML = `<div class="empty">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 8h16M4 16h16"/><circle cx="9" cy="8" r="2.2"/><circle cx="15" cy="16" r="2.2"/></svg>
+      <br>Pick a photo in Gallery first.</div>`;
+    return;
+  }
+  const saved = photo.edits || {preset:"FS Basic", ...PRESETS["FS Basic"], quality:92, scale:100, rot:0, approved:false};
+  state.edit = {...saved};
+  $("#edit-sub").textContent = photo.name + " · non-destructive, original untouched";
+  const url = await previewURL(photo);
+  body.innerHTML = `
+    <div class="edit-stage">
+      <img id="edit-img" src="${url}" style="filter:${filterString(state.edit)}">
+      <button class="hold-compare" id="compare-btn">HOLD · BEFORE</button>
+    </div>
+    <div class="eyebrow">SESSION TONE</div>
+    <div class="presets" id="presets"></div>
+    <div class="card">
+      <div class="eyebrow">FINE-TUNING</div>
+      ${sliderRow("Brightness","b",0.5,1.5,0.01)}
+      ${sliderRow("Contrast","c",0.5,1.5,0.01)}
+      ${sliderRow("Saturation","s",0,2,0.01)}
+      ${sliderRow("Warmth","w",0,0.35,0.005)}
+    </div>
+    <div class="card">
+      <div class="eyebrow">EXPORT · JPEG 8-BIT</div>
+      <div class="slider-row"><span>JPEG quality</span><input type="range" id="sl-q" min="50" max="100" step="1" value="${state.edit.quality}"><output id="out-q">${state.edit.quality}%</output></div>
+      <div class="slider-row"><span>Dimensions</span><select id="sl-scale" style="flex:1">
+        <option value="100">Original size</option>
+        <option value="75">75%</option>
+        <option value="50">50%</option>
+        <option value="25">25%</option>
+      </select></div>
+      <div class="note" style="margin-top:4px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
+        <span>Export saves an edited JPEG inside this project automatically (Mobile Export Engine). The original RAW/JPEG stays untouched. Saving an extra copy to the phone gallery is your choice only.</span>
+      </div>
+      <div class="row2">
+        <button class="btn btn-gold" id="ex-save">Export to project</button>
+        <button class="btn btn-ghost" id="ex-save-copy" disabled>Save gallery copy</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="eyebrow">SESSION TONE · PROJECT</div>
+      <button class="btn btn-ghost" id="tone-all">Apply this tone to all photos in project</button>
+      <p class="field-note" style="margin-top:8px">Mirrors Session Tone approval: the approved tone applies to the whole session, originals stay untouched.</p>
+    </div>
+    <div class="card">
+      <div class="eyebrow">PHOTO</div>
+      <div class="row2">
+        <button class="btn btn-ghost" id="rot-btn">Rotate 90°</button>
+        <button class="btn btn-ghost" id="del-btn">Remove from project</button>
+      </div>
+      <p class="field-note" style="margin-top:8px" id="del-note"></p>
+    </div>`;
+  // presets
+  const pw=$("#presets");
+  pw.innerHTML = Object.entries(PRESETS).map(([name,p])=>
+    `<button class="preset ${state.edit.preset===name?"active":""}" data-p="${name}">${name}<small>${p.note}</small></button>`).join("");
+  pw.querySelectorAll(".preset").forEach(b=>b.addEventListener("click", ()=>{
+    const p=PRESETS[b.dataset.p];
+    Object.assign(state.edit, {preset:b.dataset.p, b:p.b, c:p.c, s:p.s, w:p.w});
+    syncSliders(); applyPreview(); persistEdits(photo);
+    pw.querySelectorAll(".preset").forEach(x=>x.classList.toggle("active", x===b));
+  }));
+  // sliders
+  ["b","c","s","w"].forEach(k=>{
+    const sl=$("#sl-"+k);
+    sl.value = state.edit[k];
+    $("#out-"+k).textContent = state.edit[k].toFixed(k==="w"?3:2);
+    sl.addEventListener("input", ()=>{
+      state.edit[k]=parseFloat(sl.value); state.edit.preset="Custom";
+      $("#out-"+k).textContent = state.edit[k].toFixed(k==="w"?3:2);
+      pw.querySelectorAll(".preset").forEach(x=>x.classList.toggle("active", x.dataset.p==="Custom"));
+      applyPreview(); persistEdits(photo);
+    });
+  });
+  const q=$("#sl-q");
+  q.addEventListener("input", ()=>{ state.edit.quality=parseInt(q.value,10); $("#out-q").textContent=q.value+"%"; persistEdits(photo); });
+  // before/after
+  const img=$("#edit-img"), cmp=$("#compare-btn");
+  const showBefore=()=>{ img.style.filter="none"; cmp.textContent="RELEASE · AFTER"; };
+  const showAfter=()=>{ img.style.filter=filterString(state.edit); cmp.textContent="HOLD · BEFORE"; };
+  cmp.addEventListener("pointerdown", showBefore);
+  cmp.addEventListener("pointerup", showAfter);
+  cmp.addEventListener("pointercancel", showAfter);
+  cmp.addEventListener("pointerleave", showAfter);
+  // export
+  $("#ex-save").addEventListener("click", ()=>doExport(photo, false));
+  $("#ex-save-copy").addEventListener("click", ()=>doExport(photo, true));
+  // dimensions
+  const scaleSel=$("#sl-scale");
+  scaleSel.value=String(state.edit.scale||100);
+  scaleSel.addEventListener("change", ()=>{ state.edit.scale=parseInt(scaleSel.value,10); persistEdits(photo); });
+  // rotate
+  $("#rot-btn").addEventListener("click", async ()=>{
+    state.edit.rot=((state.edit.rot||0)+90)%360;
+    await persistEdits(photo);
+    const nu=await previewURL(photo);
+    img.src=nu; applyPreview();
+    toast("Rotated to "+state.edit.rot+" degrees");
+  });
+  // apply tone to whole project (Session Tone approval)
+  $("#tone-all").addEventListener("click", async ()=>{
+    const all=(await idbAll("photos")).filter(p=>p.projectId===photo.projectId && p.kind==="original" && p.id!==photo.id);
+    for(const p of all){
+      const e=p.edits||{};
+      p.edits={quality:e.quality||92, scale:e.scale||100, rot:e.rot||0, approved:true,
+        preset:state.edit.preset, b:state.edit.b, c:state.edit.c, s:state.edit.s, w:state.edit.w};
+      await idbPut("photos", p);
+    }
+    state.edit.approved=true; await persistEdits(photo);
+    toast("Tone approved and applied to "+(all.length+1)+" photo"+(all.length===0?"":"s"));
+  });
+  // remove photo
+  const delBtn=$("#del-btn"), delNote=$("#del-note");
+  delBtn.addEventListener("click", async ()=>{
+    if(delBtn.dataset.arm!=="1"){
+      delBtn.dataset.arm="1"; delNote.textContent="Tap again to confirm. The original inside this project is removed; nothing outside the app is touched.";
+      return;
+    }
+    const exportsOf=(await idbAll("photos")).filter(p=>p.parentId===photo.id);
+    for(const e of exportsOf) await idbDel("photos", e.id);
+    await idbDel("photos", photo.id);
+    state.editPhotoId=null;
+    toast("Photo removed from project");
+    document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("active", b.dataset.view==="gallery"));
+    showView("gallery");
+  });
+  function syncSliders(){
+    ["b","c","s","w"].forEach(k=>{
+      $("#sl-"+k).value=state.edit[k];
+      $("#out-"+k).textContent=state.edit[k].toFixed(k==="w"?3:2);
+    });
+  }
+  function applyPreview(){ img.style.filter=filterString(state.edit); }
+}
+function sliderRow(label,k,min,max,step){
+  return `<div class="slider-row"><span>${label}</span><input type="range" id="sl-${k}" min="${min}" max="${max}" step="${step}"><output id="out-${k}"></output></div>`;
+}
+async function persistEdits(photo){
+  photo.edits = {...state.edit};
+  await idbPut("photos", photo);
+}
+async function doExport(photo, alsoDownload){
+  const btn=$("#ex-save"); btn.disabled=true; btn.textContent="Exporting…";
+  try{
+    const img = await loadImage(photo.blob);
+    const canvas=document.createElement("canvas");
+    const rot=state.edit.rot||0, scale=(state.edit.scale||100)/100;
+    const swap=rot===90||rot===270;
+    canvas.width=Math.max(1,Math.round((swap?img.naturalHeight:img.naturalWidth)*scale));
+    canvas.height=Math.max(1,Math.round((swap?img.naturalWidth:img.naturalHeight)*scale));
+    const ctx=canvas.getContext("2d");
+    ctx.filter = filterString(state.edit);
+    ctx.translate(canvas.width/2, canvas.height/2);
+    ctx.rotate(rot*Math.PI/180);
+    ctx.scale(scale, scale);
+    ctx.drawImage(img,-img.naturalWidth/2,-img.naturalHeight/2);
+    const q = Math.min(100, Math.max(50, state.edit.quality))/100;
+    const blob = await new Promise(res=>canvas.toBlob(res,"image/jpeg",q));
+    if(!blob) throw new Error("Export failed");
+    await persistEdits(photo);
+    await idbPut("photos", {
+      id:uid(), projectId:photo.projectId, kind:"export", parentId:photo.id,
+      name:photo.name.replace(/\.[^.]+$/,"")+"_edited.jpg", blob, created:Date.now()
+    });
+    toast("Edited JPEG saved inside the project");
+    const copyBtn=$("#ex-save-copy"); copyBtn.disabled=false;
+    if(alsoDownload){
+      const a=document.createElement("a");
+      a.href=URL.createObjectURL(blob);
+      a.download=photo.name.replace(/\.[^.]+$/,"")+"_edited.jpg";
+      document.body.appendChild(a); a.click(); a.remove();
+      toast("Gallery copy download started");
+    }
+  }catch(e){
+    toast("Export failed: "+(e.message||e));
+  }finally{
+    btn.disabled=false; btn.textContent="Export to project";
+  }
+}
+async function previewURL(photo){
+  const rot=(state.edit && state.edit.rot)||0;
+  if(!rot) return URL.createObjectURL(photo.blob);
+  const img=await loadImage(photo.blob);
+  const swap=rot===90||rot===270;
+  const c=document.createElement("canvas");
+  c.width=swap?img.naturalHeight:img.naturalWidth;
+  c.height=swap?img.naturalWidth:img.naturalHeight;
+  const x=c.getContext("2d");
+  x.translate(c.width/2,c.height/2);
+  x.rotate(rot*Math.PI/180);
+  x.drawImage(img,-img.naturalWidth/2,-img.naturalHeight/2);
+  return c.toDataURL("image/jpeg",0.9);
+}
+async function analyzePhoto(photo){
+  try{
+    const img=await loadImage(photo.blob);
+    const w=160, h=Math.max(1,Math.round(160*img.naturalHeight/Math.max(1,img.naturalWidth)));
+    const c=document.createElement("canvas"); c.width=w; c.height=h;
+    const x=c.getContext("2d"); x.drawImage(img,0,0,w,h);
+    const d=x.getImageData(0,0,w,h).data;
+    const n=w*h, gray=new Float32Array(n);
+    let sum=0;
+    for(let i=0;i<n;i++){ const v=0.299*d[i*4]+0.587*d[i*4+1]+0.114*d[i*4+2]; gray[i]=v; sum+=v; }
+    const mean=sum/n;
+    let lsum=0, lsq=0, cnt=0;
+    for(let y=1;y<h-1;y++)for(let xx=1;xx<w-1;xx++){
+      const i=y*w+xx;
+      const lap=4*gray[i]-gray[i-1]-gray[i+1]-gray[i-w]-gray[i+w];
+      lsum+=lap; lsq+=lap*lap; cnt++;
+    }
+    const lm=lsum/cnt, lv=lsq/cnt-lm*lm;
+    const flags=[];
+    if(lv<25) flags.push("Soft focus?");
+    if(mean<55) flags.push("Dark");
+    if(mean>205) flags.push("Bright");
+    return {exposure:Math.round(mean), focus:Math.round(lv), flags};
+  }catch(_){ return null; }
+}
+function qBadge(a){
+  if(!a) return "";
+  if(a.flags.length) return `<span class="q-badge warn">${a.flags[0]}</span>`;
+  return `<span class="q-badge ok">Looks OK</span>`;
+}
+function loadImage(blob){
+  return new Promise((res,rej)=>{
+    const img=new Image();
+    img.onload=()=>res(img);
+    img.onerror=()=>rej(new Error("Could not decode image"));
+    img.src=URL.createObjectURL(blob);
+  });
+}
+function esc(s){ return String(s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+/* ---------- boot ---------- */
+if("serviceWorker" in navigator && location.protocol.startsWith("http")){
+  window.addEventListener("load", ()=>{ navigator.serviceWorker.register("sw.js").catch(()=>{}); });
+}
+window.addEventListener("DOMContentLoaded", async ()=>{
+  await openDB();
+  await loadProjects();
+  $("#p-date").value = new Date().toISOString().slice(0,10);
+  $("#p-create").addEventListener("click", createProject);
+  $("#home-new-project").addEventListener("click", ()=>{
+    document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("active", b.dataset.view==="projects"));
+    showView("projects");
+  });
+  $("#file-input").addEventListener("change", e=>{
+    if(e.target.files.length) importFiles([...e.target.files]);
+    e.target.value="";
+  });
+  if(storageMode==="session"){
+    toast("Note: storage is session-only in this browser mode");
+  }
+  const hash = location.hash.replace("#","");
+  if(["home","projects","gallery","edit","devices"].includes(hash)){
+    document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("active", b.dataset.view===hash));
+    showView(hash);
+  } else {
+    renderHome();
+  }
+});
+</script>
+</body>
+</html>
