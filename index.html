@@ -183,7 +183,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Originals are never modified. Editing is non-destructive and exports are new JPEG copies, exactly as the Frame Sense specification requires.</span>
     </div>
-    <footer class="foot">Frame Sense Mobile · v1.5 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch. Scene categories (Dance / Party / Hall), RAW support and desktop pairing are still planned.</footer>
+    <footer class="foot">Frame Sense Mobile · v1.5.1 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch. Scene categories (Dance / Party / Hall), RAW support and desktop pairing are still planned.</footer>
   </section>
 
   <!-- PROJECTS -->
@@ -626,7 +626,7 @@ async function renderGallery(){
         for(const p of origs){
           if(p.faces==null){ p.faces = await countFaces(p); await idbPut("photos", p); }
         }
-        state.galleryGroup = !state.galleryGroup;
+        state.sceneGroup=false; state.galleryGroup = !state.galleryGroup;
         renderGallery();
       }catch(e){ toast("Face detection failed on this device"); }
       aiGroup.disabled=false;
