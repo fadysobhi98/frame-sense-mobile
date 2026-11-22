@@ -183,7 +183,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Originals are never modified. Editing is non-destructive and exports are new JPEG copies, exactly as the Frame Sense specification requires.</span>
     </div>
-    <footer class="foot">Frame Sense Mobile · v1.4.1 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch. Scene categories (Dance / Party / Hall), RAW support and desktop pairing are still planned.</footer>
+    <footer class="foot">Frame Sense Mobile · v1.4.2 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch. Scene categories (Dance / Party / Hall), RAW support and desktop pairing are still planned.</footer>
   </section>
 
   <!-- PROJECTS -->
@@ -522,6 +522,7 @@ async function renderGallery(){
       <div id="ai-status" class="sub" style="margin-bottom:10px">Face detection engine: not installed.</div>
       <button class="btn btn-ghost" id="ai-enable">Enable on-device AI (one-time download, about 10 MB)</button>
       <button class="btn btn-ghost" id="ai-group" style="display:none; margin-top:8px">Group photos by people (AI face detection)</button>
+      <button class="btn btn-ghost" id="ai-remove" style="display:none; margin-top:8px; opacity:.75">Remove AI engine from this device (frees about 10 MB)</button>
       <div class="note" style="margin-top:8px">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
         <span>The engine is downloaded once, cached on your device, and works offline after. Photos are analyzed on this phone and are never uploaded anywhere.</span>
@@ -562,19 +563,42 @@ async function renderGallery(){
     renderGallery();
   });
   // AI Engine card
-  const aiStatus=body.querySelector("#ai-status"), aiEnable=body.querySelector("#ai-enable"), aiGroup=body.querySelector("#ai-group");
+  const aiStatus=body.querySelector("#ai-status"), aiEnable=body.querySelector("#ai-enable"), aiGroup=body.querySelector("#ai-group"), aiRemove=body.querySelector("#ai-remove");
   if(aiEnable){
     if(aiConsented()){
       aiStatus.textContent="Face detection engine: approved. It loads on first use, no extra downloads after.";
-      aiEnable.style.display="none"; aiGroup.style.display="block";
+      aiEnable.style.display="none"; aiGroup.style.display="block"; aiRemove.style.display="block";
     }
+    aiRemove.addEventListener("click", async ()=>{
+      aiRemove.disabled=true; aiRemove.textContent="Removing AI engine from this device…";
+      try{ localStorage.removeItem("fsAI"); }catch(_){}
+      try{ if(faceDetector&&faceDetector.close) faceDetector.close(); }catch(_){}
+      faceDetector=null; aiLoading=null;
+      try{
+        const keys=await caches.keys();
+        for(const k of keys){
+          const cache=await caches.open(k);
+          const reqs=await cache.keys();
+          for(const r of reqs){ if(/mediapipe|tasks-vision|googleapis/.test(r.url)) await cache.delete(r); }
+        }
+      }catch(_){}
+      state.galleryGroup=false;
+      aiStatus.textContent="Face detection engine: not installed.";
+      aiEnable.style.display="block"; aiEnable.disabled=false;
+      aiEnable.textContent="Enable on-device AI (one-time download, about 10 MB)";
+      aiGroup.style.display="none";
+      aiRemove.style.display="none"; aiRemove.disabled=false;
+      aiRemove.textContent="Remove AI engine from this device (frees about 10 MB)";
+      toast("AI engine removed from this device. Your photos and projects are untouched.");
+      renderGallery();
+    });
     aiEnable.addEventListener("click", async ()=>{
       aiEnable.disabled=true; aiEnable.textContent="Downloading AI engine (about 10 MB, one time)…";
       try{
         await ensureAI();
         try{ localStorage.setItem("fsAI","1"); }catch(_){}
         aiStatus.textContent="Face detection engine: ready on this device (works offline now).";
-        aiEnable.style.display="none"; aiGroup.style.display="block";
+        aiEnable.style.display="none"; aiGroup.style.display="block"; aiRemove.style.display="block";
         toast("AI engine ready. Photos are analyzed on this device only.");
       }catch(e){
         aiEnable.disabled=false; aiEnable.textContent="Enable on-device AI (one-time download, about 10 MB)";
