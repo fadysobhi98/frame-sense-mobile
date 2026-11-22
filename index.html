@@ -187,7 +187,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Originals are never modified. Editing is non-destructive and exports are new JPEG copies, exactly as the Frame Sense specification requires.</span>
     </div>
-    <footer class="foot">Frame Sense Mobile · v1.7.19 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 and ARW verified; NEF / DNG untested) decodes on this device with the RAW file kept untouched, with optional wavelet noise reduction at decode. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Photographer credit (EXIF) is optional and off by default: nothing is embedded unless you switch it on and type the values; originals stay untouched. Desktop pairing is still planned.</footer>
+    <footer class="foot">Frame Sense Mobile · v1.7.20 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 and ARW verified; NEF / DNG untested) decodes on this device with the RAW file kept untouched, with optional wavelet noise reduction at decode. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Photographer credit (EXIF) is optional and off by default: nothing is embedded unless you switch it on and type the values; originals stay untouched. Desktop pairing is still planned.</footer>
   </section>
 
   <!-- PROJECTS -->
@@ -427,9 +427,9 @@ function exifPrefs(){
     };
   }catch(_){ return {on:false, artist:"", copyr:""}; }
 }
-async function withCopyright(blob){
+async function withCopyright(blob, p){
   try{
-    const p=exifPrefs();
+    p = p || exifPrefs();
     if(!p.on || (!p.artist && !p.copyr) || !window.piexif || !blob || blob.type!=="image/jpeg") return blob;
     const dataUrl=await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(r.error); r.readAsDataURL(blob); });
     const zeroth={};
@@ -1323,9 +1323,9 @@ async function renderEdit(){
   const p0=exifPrefs();
   exOn.checked=p0.on; exA.value=p0.artist; exC.value=p0.copyr;
   const exifWhat=()=>{ const p=exifPrefs(); const bits=[]; if(p.artist) bits.push("Artist: "+p.artist); if(p.copyr) bits.push("Copyright: "+p.copyr); if(p.on) bits.push("Software: Frame Sense"); $("#exif-what").textContent = p.on ? (bits.join(" · ")||"(fill the fields above)") : "(embedding is off)"; };
-  exOn.addEventListener("change", ()=>{ try{ localStorage.setItem("fsExifOn", exOn.checked?"1":"0"); }catch(_){} exifWhat(); resetShareState(); });
-  exA.addEventListener("input", ()=>{ try{ localStorage.setItem("fsExifArtist", exA.value); }catch(_){} exifWhat(); resetShareState(); });
-  exC.addEventListener("input", ()=>{ try{ localStorage.setItem("fsExifCopy", exC.value); }catch(_){} exifWhat(); resetShareState(); });
+  exOn.addEventListener("change", ()=>{ try{ localStorage.setItem("fsExifOn", exOn.checked?"1":"0"); }catch(_){} exifWhat(); editGen++; resetShareState(); });
+  exA.addEventListener("input", ()=>{ try{ localStorage.setItem("fsExifArtist", exA.value); }catch(_){} exifWhat(); editGen++; resetShareState(); });
+  exC.addEventListener("input", ()=>{ try{ localStorage.setItem("fsExifCopy", exC.value); }catch(_){} exifWhat(); editGen++; resetShareState(); });
   exifWhat();
   $("#ex-save").addEventListener("click", ()=>doExport(photo));
   $("#ex-save-copy").addEventListener("click", async ()=>{
@@ -1425,7 +1425,7 @@ async function persistEdits(photo, keepShare){
      file no longer matches and must be unstaged. Export flows call this with
      keepShare=true: they stage the file built from these exact settings, so
      the write itself must not wipe the fresh stage. */
-  if(!keepShare) resetShareState();
+  if(!keepShare){ editGen++; resetShareState(); }
   await idbPut("photos", photo);
 }
 async function updateCropPreview(photo){
@@ -1448,11 +1448,15 @@ async function updateCropPreview(photo){
   $("#sl-cropx").disabled=slackX<2; $("#sl-cropy").disabled=slackY<2;
   $("#sl-cropx").value=String(cx); $("#sl-cropy").value=String(cy);
 }
-async function buildExportCanvas(photo, maxDim){
+async function buildExportCanvas(photo, maxDim, e){
+  /* e is an immutable settings snapshot taken at export start: the whole
+     build reads it, never live state.edit, so a control changed mid-build
+     can never produce a mixed-bake output. */
+  e = e || state.edit;
   const img = await exportImageSource(photo);
   const iw=img.naturalWidth||img.width, ih=img.naturalHeight||img.height;
   let canvas=document.createElement("canvas");
-  const rot=state.edit.rot||0, scale=(state.edit.scale||100)/100;
+  const rot=e.rot||0, scale=(e.scale||100)/100;
   const swap=rot===90||rot===270;
   canvas.width=Math.max(1,Math.round((swap?ih:iw)*scale));
   canvas.height=Math.max(1,Math.round((swap?iw:ih)*scale));
@@ -1461,12 +1465,12 @@ async function buildExportCanvas(photo, maxDim){
   ctx.rotate(rot*Math.PI/180);
   ctx.scale(scale, scale);
   ctx.drawImage(img,-iw/2,-ih/2);
-  const crop=state.edit.crop||"none";
+  const crop=e.crop||"none";
   if(crop!=="none"){
     const parts=crop.split(":"), aspect=parseFloat(parts[0])/parseFloat(parts[1]);
     let cw,ch;
     if(canvas.width/canvas.height>aspect){ ch=canvas.height; cw=Math.max(1,Math.round(ch*aspect)); } else { cw=canvas.width; ch=Math.max(1,Math.round(cw/aspect)); }
-    const x0=Math.round((canvas.width-cw)*(state.edit.cropX??0.5)), y0=Math.round((canvas.height-ch)*(state.edit.cropY??0.5));
+    const x0=Math.round((canvas.width-cw)*(e.cropX??0.5)), y0=Math.round((canvas.height-ch)*(e.cropY??0.5));
     const c2=document.createElement("canvas"); c2.width=cw; c2.height=ch;
     c2.getContext("2d").drawImage(canvas,x0,y0,cw,ch,0,0,cw,ch);
     canvas=c2;
@@ -1478,7 +1482,7 @@ async function buildExportCanvas(photo, maxDim){
     c3.getContext("2d").drawImage(canvas,0,0,c3.width,c3.height);
     canvas=c3;
   }
-  bakeEdits(canvas, state.edit);
+  bakeEdits(canvas, e);
   /* iOS Safari silently purges canvas backing stores past its memory budget and
      then returns all-zero pixels: without this check the app would save a blank
      JPEG and report success. Only a fully transparent canvas counts as blank, so
@@ -1499,13 +1503,16 @@ async function buildExportCanvas(photo, maxDim){
 async function doInstagramExport(photo){
   const btn=$("#ex-instagram"); btn.disabled=true; btn.textContent="Building Instagram copy…";
   try{
-    const canvas=await buildExportCanvas(photo, 1080);
-    const q=Math.min(100,Math.max(50,state.edit.quality))/100;
+    const gen0=editGen, srcId=state.editPhotoId, snap={...state.edit}, exifSnap=exifPrefs();
+    const canvas=await buildExportCanvas(photo, 1080, snap);
+    const q=Math.min(100,Math.max(50,snap.quality))/100;
     let blob=await new Promise(res=>canvas.toBlob(res,"image/jpeg",q));
-    blob=await withCopyright(blob);
+    blob=await withCopyright(blob, exifSnap);
     if(!blob) throw new Error("JPEG encode failed on this device");
+    if(exportStale(gen0, srcId)){ toast(EXPORT_STALE_MSG); return; }
     let settingsSaved=true;
     try{ await persistEdits(photo, true); }catch(_se){ settingsSaved=false; }
+    if(exportStale(gen0, srcId)){ toast(EXPORT_STALE_MSG); return; }
     const rec={ id:uid(), projectId:photo.projectId, kind:"export", parentId:photo.id,
       name:photo.name.replace(/\.[^.]+$/,"")+"_instagram.jpg", blob, created:Date.now() };
     try{ await idbPut("photos", rec); }
@@ -1525,6 +1532,14 @@ async function doInstagramExport(photo){
    Tap 1 builds + saves the export and stages it; tap 2 shares the staged file
    synchronously. Any edit change unstages it (resetShareState via persistEdits). */
 let pendingShare=null;
+/* Bumped by every control that changes export-affecting settings. An export
+   snapshots it (plus the settings object, EXIF prefs and the selected photo)
+   at start and re-checks before staging and before writing the record: a
+   mismatch means the output no longer matches the controls, so the export is
+   cancelled with a plain message instead of silently publishing stale pixels. */
+let editGen=0;
+const EXPORT_STALE_MSG="The photo or its settings changed during export, so the export was cancelled and nothing was saved. Export again to use the current settings.";
+function exportStale(gen0, srcId){ return editGen!==gen0 || state.editPhotoId!==srcId; }
 function resetShareState(){
   pendingShare=null;
   const b=$("#ex-save-copy"); if(b) b.textContent="Save to phone gallery";
@@ -1536,11 +1551,13 @@ function stageShare(blob, fname){
 async function doExport(photo){
   const btn=$("#ex-save"); btn.disabled=true; btn.textContent="Exporting…";
   try{
-    const canvas=await buildExportCanvas(photo, 0);
-    const q = Math.min(100, Math.max(50, state.edit.quality))/100;
+    const gen0=editGen, srcId=state.editPhotoId, snap={...state.edit}, exifSnap=exifPrefs();
+    const canvas=await buildExportCanvas(photo, 0, snap);
+    const q = Math.min(100, Math.max(50, snap.quality))/100;
     let blob = await new Promise(res=>canvas.toBlob(res,"image/jpeg",q));
-    blob = await withCopyright(blob);
+    blob = await withCopyright(blob, exifSnap);
     if(!blob) throw new Error("JPEG encode failed on this device");
+    if(exportStale(gen0, srcId)){ toast(EXPORT_STALE_MSG); return; }
     const fname=photo.name.replace(/\.[^.]+$/,"")+"_edited.jpg";
     /* Stage the shareable copy BEFORE any storage attempt: the image then
        reaches the phone gallery even if a storage write hangs forever (the
@@ -1550,6 +1567,7 @@ async function doExport(photo){
     stageShare(blob, fname);
     let settingsSaved=true, recSaved=true, why="";
     try{ await persistEdits(photo, true); }catch(e){ settingsSaved=false; why=(e&&e.message)||String(e); }
+    if(exportStale(gen0, srcId)){ toast(EXPORT_STALE_MSG); return; }
     const rec={ id:uid(), projectId:photo.projectId, kind:"export", parentId:photo.id, name:fname, blob, created:Date.now() };
     try{ await idbPut("photos", rec); }
     catch(e1){
