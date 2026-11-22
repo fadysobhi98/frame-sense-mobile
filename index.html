@@ -183,7 +183,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Originals are never modified. Editing is non-destructive and exports are new JPEG copies, exactly as the Frame Sense specification requires.</span>
     </div>
-    <footer class="foot">Frame Sense Mobile · v1.6.0 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 verified; NEF / ARW / DNG untested) decodes on this device with the RAW file kept untouched. Desktop pairing is still planned.</footer>
+    <footer class="foot">Frame Sense Mobile · v1.7.0 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 verified; NEF / ARW / DNG untested) decodes on this device with the RAW file kept untouched. High Sharpness and Crop / Instagram Ready exports are built in. Desktop pairing is still planned.</footer>
   </section>
 
   <!-- PROJECTS -->
@@ -347,9 +347,9 @@ function filterString(e){
 // Bake the same edits into pixels. Needed because iOS Safari ignores canvas ctx.filter,
 // which silently exported the "before" image. This path works everywhere.
 function bakeEdits(canvas, e){
-  const b=e.b??1, c=e.c??1, s=e.s??1, w=e.w??0;
-  if(b===1&&c===1&&s===1&&!w) return;
+  const b=e.b??1, c=e.c??1, s=e.s??1, w=e.w??0, sh=e.sh||0;
   const ctx=canvas.getContext("2d");
+  if(!(b===1&&c===1&&s===1&&!w)){
   const id=ctx.getImageData(0,0,canvas.width,canvas.height);
   const d=id.data;
   for(let i=0;i<d.length;i+=4){
@@ -366,6 +366,30 @@ function bakeEdits(canvas, e){
     d[i+2]=bl<0?0:bl>255?255:Math.round(bl);
   }
   ctx.putImageData(id,0,0);
+  }
+  if(sh>0){
+    const W=canvas.width, H=canvas.height;
+    const id2=ctx.getImageData(0,0,W,H), d2=id2.data, src=new Uint8ClampedArray(d2);
+    const blur=new Float32Array(W*H*3);
+    for(let y=0;y<H;y++){ const rw=y*W;
+      for(let x=0;x<W;x++){
+        const xm=x>0?x-1:x, xp=x<W-1?x+1:x;
+        for(let ch=0;ch<3;ch++) blur[(rw+x)*3+ch]=(src[(rw+xm)*4+ch]+src[(rw+x)*4+ch]+src[(rw+xp)*4+ch])*0.3333333;
+      }
+    }
+    for(let y=0;y<H;y++){
+      const ym=(y>0?y-1:y)*W, y0=y*W, yp=(y<H-1?y+1:y)*W;
+      for(let x=0;x<W;x++){
+        for(let ch=0;ch<3;ch++){
+          const v=(blur[ym*3+x*3+ch]+blur[y0*3+x*3+ch]+blur[yp*3+x*3+ch])*0.3333333;
+          const i=(y0+x)*4+ch;
+          const sharp=src[i]+sh*(src[i]-v);
+          d2[i]=sharp<0?0:sharp>255?255:Math.round(sharp);
+        }
+      }
+    }
+    ctx.putImageData(id2,0,0);
+  }
 }
 function fmtDate(d){ try{ return new Date(d+"T00:00:00").toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"}); }catch(_){ return d; } }
 
@@ -793,7 +817,7 @@ async function renderEdit(){
       <br>Pick a photo in Gallery first.</div>`;
     return;
   }
-  const saved = photo.edits || {preset:"FS Basic", ...PRESETS["FS Basic"], quality:92, scale:100, rot:0, approved:false};
+  const saved = photo.edits || {preset:"FS Basic", ...PRESETS["FS Basic"], quality:92, scale:100, rot:0, sh:0, crop:"none", approved:false};
   state.edit = {...saved};
   $("#edit-sub").textContent = photo.raw ? photo.raw.name + " · RAW original stored untouched · you are editing its JPEG working copy" : photo.name + " · non-destructive, original untouched";
   const url = await previewURL(photo);
@@ -812,6 +836,7 @@ async function renderEdit(){
       ${sliderRow("Contrast","c",0.5,1.5,0.01)}
       ${sliderRow("Saturation","s",0,2,0.01)}
       ${sliderRow("Warmth","w",0,0.35,0.005)}
+      ${sliderRow("Sharpen · High Sharpness","sh",0,1,0.05)}
     </div>
     <div class="card">
       <div class="eyebrow">EXPORT · JPEG 8-BIT</div>
@@ -822,14 +847,21 @@ async function renderEdit(){
         <option value="50">50%</option>
         <option value="25">25%</option>
       </select></div>
+      <div class="slider-row"><span>Crop</span><select id="sl-crop" style="flex:1">
+        <option value="none">Original frame</option>
+        <option value="1:1">Square 1:1 (Instagram)</option>
+        <option value="4:5">Portrait 4:5 (Instagram)</option>
+        <option value="16:9">Landscape 16:9</option>
+      </select></div>
       <div class="note" style="margin-top:4px">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
-        <span>Export saves an edited JPEG inside this project automatically (Mobile Export Engine). The original stays untouched. "Save to phone gallery" opens the share sheet on iPhone; choose "Save Image" to put the edited JPEG straight into Photos.</span>
+        <span>Export saves an edited JPEG inside this project automatically (Mobile Export Engine). The original stays untouched. Sharpen and crop are baked into the exported JPEG; the live preview shows tone only. "Instagram copy" adds a 1080 px version ready to post. "Save to phone gallery" opens the share sheet on iPhone; choose "Save Image" to put the edited JPEG straight into Photos.</span>
       </div>
       <div class="row2">
         <button class="btn btn-gold" id="ex-save">Export to project</button>
         <button class="btn btn-ghost" id="ex-save-copy" disabled>Save to phone gallery</button>
       </div>
+      <button class="btn btn-ghost" id="ex-instagram" style="margin-top:8px">Instagram copy · 1080 px, saved to project</button>
     </div>
     <div class="card">
       <div class="eyebrow">SESSION TONE · PROJECT</div>
@@ -855,7 +887,7 @@ async function renderEdit(){
     pw.querySelectorAll(".preset").forEach(x=>x.classList.toggle("active", x===b));
   }));
   // sliders
-  ["b","c","s","w"].forEach(k=>{
+  ["b","c","s","w","sh"].forEach(k=>{
     const sl=$("#sl-"+k);
     sl.value = state.edit[k];
     $("#out-"+k).textContent = state.edit[k].toFixed(k==="w"?3:2);
@@ -944,6 +976,10 @@ async function renderEdit(){
   const scaleSel=$("#sl-scale");
   scaleSel.value=String(state.edit.scale||100);
   scaleSel.addEventListener("change", ()=>{ state.edit.scale=parseInt(scaleSel.value,10); persistEdits(photo); });
+  const cropSel=$("#sl-crop");
+  cropSel.value=state.edit.crop||"none";
+  cropSel.addEventListener("change", ()=>{ state.edit.crop=cropSel.value; persistEdits(photo); toast("Crop set to "+cropSel.options[cropSel.selectedIndex].text+" · baked into the exported JPEG"); });
+  $("#ex-instagram").addEventListener("click", ()=>doInstagramExport(photo));
   // rotate
   $("#rot-btn").addEventListener("click", async ()=>{
     state.edit.rot=((state.edit.rot||0)+90)%360;
@@ -980,7 +1016,7 @@ async function renderEdit(){
     showView("gallery");
   });
   function syncSliders(){
-    ["b","c","s","w"].forEach(k=>{
+    ["b","c","s","w","sh"].forEach(k=>{
       $("#sl-"+k).value=state.edit[k];
       $("#out-"+k).textContent=state.edit[k].toFixed(k==="w"?3:2);
     });
@@ -994,21 +1030,61 @@ async function persistEdits(photo){
   photo.edits = {...state.edit};
   await idbPut("photos", photo);
 }
+async function buildExportCanvas(photo, maxDim){
+  const img = await loadImage(photo.blob);
+  let canvas=document.createElement("canvas");
+  const rot=state.edit.rot||0, scale=(state.edit.scale||100)/100;
+  const swap=rot===90||rot===270;
+  canvas.width=Math.max(1,Math.round((swap?img.naturalHeight:img.naturalWidth)*scale));
+  canvas.height=Math.max(1,Math.round((swap?img.naturalWidth:img.naturalHeight)*scale));
+  const ctx=canvas.getContext("2d");
+  ctx.translate(canvas.width/2, canvas.height/2);
+  ctx.rotate(rot*Math.PI/180);
+  ctx.scale(scale, scale);
+  ctx.drawImage(img,-img.naturalWidth/2,-img.naturalHeight/2);
+  const crop=state.edit.crop||"none";
+  if(crop!=="none"){
+    const parts=crop.split(":"), aspect=parseFloat(parts[0])/parseFloat(parts[1]);
+    let cw,ch;
+    if(canvas.width/canvas.height>aspect){ ch=canvas.height; cw=Math.max(1,Math.round(ch*aspect)); } else { cw=canvas.width; ch=Math.max(1,Math.round(cw/aspect)); }
+    const x0=Math.round((canvas.width-cw)/2), y0=Math.round((canvas.height-ch)/2);
+    const c2=document.createElement("canvas"); c2.width=cw; c2.height=ch;
+    c2.getContext("2d").drawImage(canvas,x0,y0,cw,ch,0,0,cw,ch);
+    canvas=c2;
+  }
+  if(maxDim && Math.max(canvas.width,canvas.height)>maxDim){
+    const sc=maxDim/Math.max(canvas.width,canvas.height);
+    const c3=document.createElement("canvas");
+    c3.width=Math.max(1,Math.round(canvas.width*sc)); c3.height=Math.max(1,Math.round(canvas.height*sc));
+    c3.getContext("2d").drawImage(canvas,0,0,c3.width,c3.height);
+    canvas=c3;
+  }
+  bakeEdits(canvas, state.edit);
+  return canvas;
+}
+async function doInstagramExport(photo){
+  const btn=$("#ex-instagram"); btn.disabled=true; btn.textContent="Building Instagram copy…";
+  try{
+    const canvas=await buildExportCanvas(photo, 1080);
+    const q=Math.min(100,Math.max(50,state.edit.quality))/100;
+    const blob=await new Promise(res=>canvas.toBlob(res,"image/jpeg",q));
+    if(!blob) throw new Error("Export failed");
+    await persistEdits(photo);
+    await idbPut("photos", {
+      id:uid(), projectId:photo.projectId, kind:"export", parentId:photo.id,
+      name:photo.name.replace(/\.[^.]+$/,"")+"_instagram.jpg", blob, created:Date.now()
+    });
+    toast("Instagram copy saved inside the project (max 1080 px, JPEG)");
+  }catch(e){
+    toast("Instagram export failed: "+(e.message||e));
+  }finally{
+    btn.disabled=false; btn.textContent="Instagram copy · 1080 px, saved to project";
+  }
+}
 async function doExport(photo, alsoDownload){
   const btn=$("#ex-save"); btn.disabled=true; btn.textContent="Exporting…";
   try{
-    const img = await loadImage(photo.blob);
-    const canvas=document.createElement("canvas");
-    const rot=state.edit.rot||0, scale=(state.edit.scale||100)/100;
-    const swap=rot===90||rot===270;
-    canvas.width=Math.max(1,Math.round((swap?img.naturalHeight:img.naturalWidth)*scale));
-    canvas.height=Math.max(1,Math.round((swap?img.naturalWidth:img.naturalHeight)*scale));
-    const ctx=canvas.getContext("2d");
-    ctx.translate(canvas.width/2, canvas.height/2);
-    ctx.rotate(rot*Math.PI/180);
-    ctx.scale(scale, scale);
-    ctx.drawImage(img,-img.naturalWidth/2,-img.naturalHeight/2);
-    bakeEdits(canvas, state.edit);
+    const canvas=await buildExportCanvas(photo, 0);
     const q = Math.min(100, Math.max(50, state.edit.quality))/100;
     const blob = await new Promise(res=>canvas.toBlob(res,"image/jpeg",q));
     if(!blob) throw new Error("Export failed");
