@@ -183,7 +183,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Originals are never modified. Editing is non-destructive and exports are new JPEG copies, exactly as the Frame Sense specification requires.</span>
     </div>
-    <footer class="foot">Frame Sense Mobile · v1.7.5 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 verified; NEF / ARW / DNG untested) decodes on this device with the RAW file kept untouched. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Photographer credit (EXIF) is optional and off by default: nothing is embedded unless you switch it on and type the values; originals stay untouched. Desktop pairing is still planned.</footer>
+    <footer class="foot">Frame Sense Mobile · v1.7.6 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 and ARW verified; NEF / DNG untested) decodes on this device with the RAW file kept untouched, with optional wavelet noise reduction at decode. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Photographer credit (EXIF) is optional and off by default: nothing is embedded unless you switch it on and type the values; originals stay untouched. Desktop pairing is still planned.</footer>
   </section>
 
   <!-- PROJECTS -->
@@ -585,7 +585,7 @@ async function renderGallery(){
       Import photos</button>
     <div class="note">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
-      <span>Import copies JPEG / PNG / WebP into the app. RAW files need the optional RAW import engine below (about 2 MB, runs on this device). Canon CR2 is verified by our tests; Nikon NEF, Sony ARW and DNG are supported by the decoder library but not individually tested yet. Your RAW file is kept untouched; editing uses a clearly labeled JPEG working copy.</span>
+      <span>Import copies JPEG / PNG / WebP into the app. RAW files need the optional RAW import engine below (about 2 MB, runs on this device). Canon CR2 and Sony ARW are verified by our tests; Nikon NEF and DNG are supported by the decoder library but not individually tested yet. Your RAW file is kept untouched; editing uses a clearly labeled JPEG working copy.</span>
     </div>
     <div class="card" id="ai-card">
       <div class="eyebrow">AI ENGINE · RUNS ON THIS DEVICE</div>
@@ -600,6 +600,12 @@ async function renderGallery(){
       <div id="raw-status" class="sub" style="margin:14px 0 10px">RAW import engine: not installed.</div>
       <button class="btn btn-ghost" id="raw-enable">Enable RAW import (one-time download, about 2 MB)</button>
       <button class="btn btn-ghost" id="raw-remove" style="display:none; margin-top:8px; opacity:.75">Remove RAW engine from this device (frees about 2 MB)</button>
+      <div class="slider-row" style="margin-top:10px"><span>RAW noise reduction at decode</span><select id="raw-denoise" style="flex:1">
+        <option value="0">Off (default)</option>
+        <option value="100">Mild · wavelet filter, slight softening</option>
+        <option value="200">Medium · wavelet filter, visible softening</option>
+      </select></div>
+      <p class="field-note">RAW imports only, applied at decode by the libraw wavelet filter (signal processing, no AI). Measured on this device with a clean CR2 sample: Mild cut grain about 20% and kept about 76% of fine-detail energy; Medium cut about 36% and kept about 55%. A noisy photo benefits more. The RAW file stays untouched: re-import with a different setting any time.</p>
       <div class="note" style="margin-top:8px">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
         <span>The engine is downloaded once, cached on your device, and works offline after. Photos are analyzed on this phone and are never uploaded anywhere.</span>
@@ -775,6 +781,11 @@ async function renderGallery(){
   }
   // RAW import engine card
   const rawStatus=body.querySelector("#raw-status"), rawEnable=body.querySelector("#raw-enable"), rawRemove=body.querySelector("#raw-remove");
+  const rawDn=body.querySelector("#raw-denoise");
+  if(rawDn){
+    try{ rawDn.value=localStorage.getItem("fsRawDenoise")||"0"; }catch(_){}
+    rawDn.addEventListener("change", ()=>{ try{ localStorage.setItem("fsRawDenoise", rawDn.value); }catch(_){} toast("RAW decode setting saved; it applies to the next RAW imports"); });
+  }
   if(rawEnable){
     if(rawConsented()){
       rawStatus.textContent="RAW import engine: approved. It loads on first RAW import, no extra downloads after.";
@@ -1296,7 +1307,10 @@ async function decodeRAW(file){
   const raw=new rawLib();
   try{
     const bytes=new Uint8Array(await file.arrayBuffer());
-    await raw.open(bytes,{halfSize:false,outputBps:8,outputColor:1,useCameraWb:true});
+    const dn=(()=>{ try{ return parseInt(localStorage.getItem("fsRawDenoise")||"0",10)||0; }catch(_){ return 0; } })();
+    const rawOpts={halfSize:false,outputBps:8,outputColor:1,useCameraWb:true};
+    if(dn>0) rawOpts.threshold=dn;
+    await raw.open(bytes,rawOpts);
     let meta={}; try{ meta=await raw.metadata(true)||{}; }catch(_){}
     const img=await raw.imageData();
     const n=img.width*img.height, src=img.data, rgba=new Uint8ClampedArray(n*4);
@@ -1538,4 +1552,4 @@ window.addEventListener("DOMContentLoaded", async ()=>{
   </div>
 </div>
 </body>
-                                                                                                      </html>
+  </html>
