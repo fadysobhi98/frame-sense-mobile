@@ -187,7 +187,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Originals are never modified. Editing is non-destructive and exports are new JPEG copies, exactly as the Frame Sense specification requires.</span>
     </div>
-    <footer class="foot">Frame Sense Mobile · v1.7.14 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 and ARW verified; NEF / DNG untested) decodes on this device with the RAW file kept untouched, with optional wavelet noise reduction at decode. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Photographer credit (EXIF) is optional and off by default: nothing is embedded unless you switch it on and type the values; originals stay untouched. Desktop pairing is still planned.</footer>
+    <footer class="foot">Frame Sense Mobile · v1.7.15 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 and ARW verified; NEF / DNG untested) decodes on this device with the RAW file kept untouched, with optional wavelet noise reduction at decode. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Photographer credit (EXIF) is optional and off by default: nothing is embedded unless you switch it on and type the values; originals stay untouched. Desktop pairing is still planned.</footer>
   </section>
 
   <!-- PROJECTS -->
@@ -1114,7 +1114,7 @@ async function renderEdit(){
       </div>
       <div class="note" style="margin-top:4px">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
-        <span>Export saves an edited JPEG inside this project automatically (Mobile Export Engine). The original stays untouched. Sharpen and crop are baked into the exported JPEG; the live preview shows tone only. "Instagram copy" adds a 1080 px version ready to post. "Save to phone gallery" opens the share sheet on iPhone; choose "Save Image" to put the edited JPEG straight into Photos.</span>
+        <span>Export saves an edited JPEG inside this project automatically (Mobile Export Engine). The original stays untouched. Sharpen and crop are baked into the exported JPEG; the live preview shows tone only. "Instagram copy" adds a 1080 px version ready to post. "Save to phone gallery": first tap prepares the JPEG, second tap opens the share sheet on iPhone; choose "Save Image" to put the edited JPEG straight into Photos.</span>
       </div>
       <div class="row2">
         <button class="btn btn-gold" id="ex-save">Export to project</button>
@@ -1258,12 +1258,38 @@ async function renderEdit(){
   const p0=exifPrefs();
   exOn.checked=p0.on; exA.value=p0.artist; exC.value=p0.copyr;
   const exifWhat=()=>{ const p=exifPrefs(); const bits=[]; if(p.artist) bits.push("Artist: "+p.artist); if(p.copyr) bits.push("Copyright: "+p.copyr); if(p.on) bits.push("Software: Frame Sense"); $("#exif-what").textContent = p.on ? (bits.join(" · ")||"(fill the fields above)") : "(embedding is off)"; };
-  exOn.addEventListener("change", ()=>{ try{ localStorage.setItem("fsExifOn", exOn.checked?"1":"0"); }catch(_){} exifWhat(); });
-  exA.addEventListener("input", ()=>{ try{ localStorage.setItem("fsExifArtist", exA.value); }catch(_){} exifWhat(); });
-  exC.addEventListener("input", ()=>{ try{ localStorage.setItem("fsExifCopy", exC.value); }catch(_){} exifWhat(); });
+  exOn.addEventListener("change", ()=>{ try{ localStorage.setItem("fsExifOn", exOn.checked?"1":"0"); }catch(_){} exifWhat(); resetShareState(); });
+  exA.addEventListener("input", ()=>{ try{ localStorage.setItem("fsExifArtist", exA.value); }catch(_){} exifWhat(); resetShareState(); });
+  exC.addEventListener("input", ()=>{ try{ localStorage.setItem("fsExifCopy", exC.value); }catch(_){} exifWhat(); resetShareState(); });
   exifWhat();
-  $("#ex-save").addEventListener("click", ()=>doExport(photo, false));
-  $("#ex-save-copy").addEventListener("click", ()=>doExport(photo, true));
+  $("#ex-save").addEventListener("click", ()=>doExport(photo));
+  $("#ex-save-copy").addEventListener("click", async ()=>{
+    const btn=$("#ex-save-copy");
+    if(pendingShare){
+      /* second tap: share the staged file immediately, inside this tap's own
+         user activation - awaiting the export first would lose it on iOS */
+      const st=pendingShare; resetShareState();
+      btn.disabled=true; btn.textContent="Opening share sheet…";
+      try{
+        if(navigator.canShare && navigator.canShare({files:[st.file]})){
+          try{
+            await navigator.share({files:[st.file], title:"Frame Sense export"});
+            toast("Pick 'Save Image' in the share sheet to put it in Photos");
+          }catch(e){ if(e && e.name!=="AbortError") toast("Share did not complete"); }
+        }else{
+          const a=document.createElement("a");
+          a.href=URL.createObjectURL(st.blob); a.download=st.fname;
+          document.body.appendChild(a); a.click(); a.remove();
+          toast("Gallery copy download started");
+        }
+      }finally{ btn.disabled=false; btn.textContent="Save to phone gallery"; }
+      return;
+    }
+    // first tap: build + save the export, then stage it for the share tap
+    btn.disabled=true; btn.textContent="Preparing your edited JPEG…";
+    try{ await doExport(photo); }
+    finally{ btn.disabled=false; if(!pendingShare) btn.textContent="Save to phone gallery"; }
+  });
   // dimensions
   const scaleSel=$("#sl-scale");
   scaleSel.value=String(state.edit.scale||100);
@@ -1329,6 +1355,7 @@ function sliderRow(label,k,min,max,step){
 }
 async function persistEdits(photo){
   photo.edits = {...state.edit};
+  resetShareState(); // edits changed: a previously staged share file no longer matches
   await idbPut("photos", photo);
 }
 async function updateCropPreview(photo){
@@ -1418,7 +1445,20 @@ async function doInstagramExport(photo){
     btn.disabled=false; btn.textContent="Instagram copy · 1080 px, saved to project";
   }
 }
-async function doExport(photo, alsoDownload){
+/* Save-to-phone is a two-tap flow: iOS Safari only allows navigator.share inside
+   the tap itself, so the (multi-second) export must finish BEFORE the share tap.
+   Tap 1 builds + saves the export and stages it; tap 2 shares the staged file
+   synchronously. Any edit change unstages it (resetShareState via persistEdits). */
+let pendingShare=null;
+function resetShareState(){
+  pendingShare=null;
+  const b=$("#ex-save-copy"); if(b) b.textContent="Save to phone gallery";
+}
+function stageShare(blob, fname){
+  pendingShare={ blob, fname, file:new File([blob], fname, {type:"image/jpeg"}) };
+  const b=$("#ex-save-copy"); if(b){ b.disabled=false; b.textContent="Tap again to open the share sheet"; }
+}
+async function doExport(photo){
   const btn=$("#ex-save"); btn.disabled=true; btn.textContent="Exporting…";
   try{
     const canvas=await buildExportCanvas(photo, 0);
@@ -1427,28 +1467,13 @@ async function doExport(photo, alsoDownload){
     blob = await withCopyright(blob);
     if(!blob) throw new Error("Export failed");
     await persistEdits(photo);
+    const fname=photo.name.replace(/\.[^.]+$/,"")+"_edited.jpg";
     await idbPut("photos", {
       id:uid(), projectId:photo.projectId, kind:"export", parentId:photo.id,
-      name:photo.name.replace(/\.[^.]+$/,"")+"_edited.jpg", blob, created:Date.now()
+      name:fname, blob, created:Date.now()
     });
     toast("Edited JPEG saved inside the project");
-    const copyBtn=$("#ex-save-copy"); copyBtn.disabled=false;
-    if(alsoDownload){
-      const fname=photo.name.replace(/\.[^.]+$/,"")+"_edited.jpg";
-      const file=new File([blob], fname, {type:"image/jpeg"});
-      if(navigator.canShare && navigator.canShare({files:[file]})){
-        try{
-          await navigator.share({files:[file], title:"Frame Sense export"});
-          toast("Pick 'Save Image' in the share sheet to put it in Photos");
-        }catch(e){ if(e && e.name!=="AbortError") toast("Share did not complete"); }
-      }else{
-        const a=document.createElement("a");
-        a.href=URL.createObjectURL(blob);
-        a.download=fname;
-        document.body.appendChild(a); a.click(); a.remove();
-        toast("Gallery copy download started");
-      }
-    }
+    stageShare(blob, fname);
   }catch(e){
     toast("Export failed: "+(e.message||e));
   }finally{
@@ -1766,4 +1791,4 @@ window.addEventListener("DOMContentLoaded", async ()=>{
   </div>
 </div>
 </body>
-  </html>
+</html>
