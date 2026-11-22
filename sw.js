@@ -1,6 +1,6 @@
 /* Frame Sense service worker: app-shell cache so the app opens offline.
    Photos and projects live in IndexedDB on the device, not in this cache. */
-const CACHE = "framesense-v1.4";
+const CACHE = "framesense-v1.4.1";
 const ASSETS = [
   "./",
   "./index.html",
