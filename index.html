@@ -99,6 +99,9 @@ input:focus,select:focus{border-color:var(--gold2)}
 .grid{display:grid; grid-template-columns:repeat(3,1fr); gap:6px}
 .thumb{aspect-ratio:1; border-radius:10px; overflow:hidden; background:#0c0908; border:1px solid var(--line); cursor:pointer; position:relative}
 .thumb img{width:100%; height:100%; object-fit:cover; display:block}
+.thumb.broken{display:flex;align-items:center;justify-content:center;min-height:80px}
+.thumb.broken::after{content:"Can't read - re-import";font-size:10px;color:var(--muted);text-align:center;padding:6px;line-height:1.4}
+.broken-photo{color:var(--muted);font-size:14px;line-height:1.55;padding:48px 20px;text-align:center}
 .q-badge{
   position:absolute; left:4px; bottom:4px; font-size:9px; font-weight:800; letter-spacing:.4px;
   padding:2px 6px; border-radius:999px; background:rgba(16,13,11,.85); border:1px solid var(--line); color:var(--muted);
@@ -183,7 +186,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Originals are never modified. Editing is non-destructive and exports are new JPEG copies, exactly as the Frame Sense specification requires.</span>
     </div>
-    <footer class="foot">Frame Sense Mobile · v1.7.9 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 and ARW verified; NEF / DNG untested) decodes on this device with the RAW file kept untouched, with optional wavelet noise reduction at decode. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Photographer credit (EXIF) is optional and off by default: nothing is embedded unless you switch it on and type the values; originals stay untouched. Desktop pairing is still planned.</footer>
+    <footer class="foot">Frame Sense Mobile · v1.7.10 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 and ARW verified; NEF / DNG untested) decodes on this device with the RAW file kept untouched, with optional wavelet noise reduction at decode. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Photographer credit (EXIF) is optional and off by default: nothing is embedded unless you switch it on and type the values; originals stay untouched. Desktop pairing is still planned.</footer>
   </section>
 
   <!-- PROJECTS -->
@@ -302,7 +305,7 @@ function openDB(){
       };
       r.onerror = ()=>{ storageMode="session"; done(); };
       r.onblocked = ()=>{ storageMode="session"; done(); };
-      setTimeout(()=>{ if(!db){ storageMode="session"; done(); } }, 2500);
+      setTimeout(()=>{ if(!db){ storageMode="session"; done(); } }, 8000);
     }catch(_){ storageMode="session"; done(); }
   });
 }
@@ -556,7 +559,7 @@ async function renderGallery(){
         const sections=order.map(([key,label])=>{
           const v=shown.filter(p=>((p.scene&&p.scene.key)||"other")===key);
           if(!v.length) return "";
-          return `<div class="eyebrow" style="margin-top:10px">${label} (${v.length})</div><div class="grid">${v.map(p=>`<div class="thumb" data-phid="${p.id}" data-kind="${p.kind}"><img src="${URL.createObjectURL(p.blob)}" alt="">${qBadge(p.analysis)}</div>`).join("")}</div>`;
+          return `<div class="eyebrow" style="margin-top:10px">${label} (${v.length})</div><div class="grid">${v.map(p=>`<div class="thumb" data-phid="${p.id}" data-kind="${p.kind}"><img src="${URL.createObjectURL(p.blob)}" alt="" onerror="const t=this.closest('.thumb'); if(t) t.classList.add('broken'); this.remove();">${qBadge(p.analysis)}</div>`).join("")}</div>`;
         }).join("");
         return sections + `<div class="note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg><span>Scene groups are experimental zero-shot guesses from a small on-device model; photos it is unsure about land in Uncertain &amp; Other. Check before relying on them.</span></div>`;
       })() : state.galleryGroup&&tab==="originals" ? (()=>{
@@ -564,9 +567,9 @@ async function renderGallery(){
         return grp.map(([label,test])=>{
           const v=shown.filter(test);
           if(!v.length) return "";
-          return `<div class="eyebrow" style="margin-top:10px">${label}</div><div class="grid">${v.map(p=>`<div class="thumb" data-phid="${p.id}" data-kind="${p.kind}"><img src="${URL.createObjectURL(p.blob)}" alt="">${qBadge(p.analysis)+(p.best?` <span class="q-badge" style="background:#d4a857;color:#171310">&#9733; Best Shot</span>`:"")}</div>`).join("")}</div>`;
+          return `<div class="eyebrow" style="margin-top:10px">${label}</div><div class="grid">${v.map(p=>`<div class="thumb" data-phid="${p.id}" data-kind="${p.kind}"><img src="${URL.createObjectURL(p.blob)}" alt="" onerror="const t=this.closest('.thumb'); if(t) t.classList.add('broken'); this.remove();">${qBadge(p.analysis)+(p.best?` <span class="q-badge" style="background:#d4a857;color:#171310">&#9733; Best Shot</span>`:"")}</div>`).join("")}</div>`;
         }).join("");
-      })() : `<div class="grid">${shown.map(p=>`<div class="thumb" data-phid="${p.id}" data-kind="${p.kind}"><img src="${URL.createObjectURL(p.blob)}" alt="">${p.kind==="original"?(p.raw?`<span class="q-badge" style="top:4px;bottom:auto">RAW · JPEG working copy</span> `:"")+qBadge(p.analysis)+(p.best?` <span class="q-badge" style="background:#d4a857;color:#171310">&#9733; Best Shot</span>`:""):""}</div>`).join("")}</div>`}
+      })() : `<div class="grid">${shown.map(p=>`<div class="thumb" data-phid="${p.id}" data-kind="${p.kind}"><img src="${URL.createObjectURL(p.blob)}" alt="" onerror="const t=this.closest('.thumb'); if(t) t.classList.add('broken'); this.remove();">${p.kind==="original"?(p.raw?`<span class="q-badge" style="top:4px;bottom:auto">RAW · JPEG working copy</span> `:"")+qBadge(p.analysis)+(p.best?` <span class="q-badge" style="background:#d4a857;color:#171310">&#9733; Best Shot</span>`:""):""}</div>`).join("")}</div>`}
     ${tab==="originals"&&shown.length?`<div class="note">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Badges are basic exposure/focus checks computed on this device, a small honest subset of the planned AI Smart Review, not full AI analysis.</span>
@@ -885,9 +888,15 @@ async function importFiles(files){
   const proj=activeProject();
   if(!proj){ toast("Create a project first"); return; }
   let ok=0, skipped=0, rawNoEngine=0, rawFailed=0, rawOk=0;
+  const badReads=[];
   for(const f of files){
     if(!f.size){ skipped++; continue; }
     if(/^image\/(jpeg|png|webp|heic|heif)$/i.test(f.type) || /\.(jpe?g|png|webp|heic|heif)$/i.test(f.name)){
+      try{
+        await loadImage(f);
+      }catch(_){
+        skipped++; badReads.push(f.name); continue;
+      }
       await idbPut("photos", { id:uid(), projectId:proj.id, name:f.name, blob:f, kind:"original", edits:null, created:Date.now() });
       ok++;
     } else if(/\.(cr2|cr3|nef|arw|dng)$/i.test(f.name)){
@@ -909,6 +918,7 @@ async function importFiles(files){
   if(skipped) parts.push(`${skipped} skipped (unsupported)`);
   if(rawNoEngine) parts.push(`${rawNoEngine} RAW file${rawNoEngine===1?"":"s"} ${rawNoEngine===1?"needs":"need"} the RAW import engine, enable it in Gallery (about 2 MB)`);
   if(rawFailed) parts.push(`${rawFailed} RAW file${rawFailed===1?"":"s"} could not be decoded`);
+  if(badReads.length) parts.push(`${badReads.length} file${badReads.length===1?"":"s"} could not be read by this browser (${badReads.slice(0,3).join(", ")}) - nothing imported for them; try exporting them as JPEG from the Photos app first`);
   toast(parts.join(" · "));
   renderGallery(); renderHome();
 }
@@ -927,11 +937,13 @@ async function renderEdit(){
   const saved = photo.edits || {preset:"FS Basic", ...PRESETS["FS Basic"], quality:92, scale:100, rot:0, sh:0, crop:"none", cropX:0.5, cropY:0.5, approved:false};
   state.edit = {...saved};
   $("#edit-sub").textContent = photo.raw ? photo.raw.name + " · RAW original stored untouched · you are editing its JPEG working copy" : photo.name + " · non-destructive, original untouched";
-  const url = await previewURL(photo);
+  let decodeOk=true, url="";
+  try{ await loadImage(photo.blob); url=await previewURL(photo); }
+  catch(_){ decodeOk=false; }
   body.innerHTML = `
     <div class="edit-stage">
-      <img id="edit-img" src="${url}" style="filter:${filterString(state.edit)}">
-      <button class="hold-compare" id="compare-btn">HOLD · BEFORE</button>
+      ${decodeOk ? `<img id="edit-img" src="${url}" style="filter:${filterString(state.edit)}">
+      <button class="hold-compare" id="compare-btn">HOLD · BEFORE</button>` : `<div class="broken-photo"><b>This saved copy can't be read by this browser.</b><br>The original file on your phone was never touched. Remove this entry below and import the photo again (exporting it as JPEG from the Photos app first can help).</div>`}
     </div>
     <div class="eyebrow">SESSION TONE</div>
     <div class="presets" id="presets"></div>
@@ -996,6 +1008,10 @@ async function renderEdit(){
       </div>
       <p class="field-note" style="margin-top:8px" id="del-note"></p>
     </div>`;
+  if(!decodeOk){
+    ["#smart-repair","#face-retouch","#ex-save","#ex-instagram","#tone-all","#rot-btn","#ex-save-copy"].forEach(s=>{ const b=$(s); if(b) b.disabled=true; });
+    toast("This saved copy can't be read by this browser; remove it and import the photo again");
+  }
   // presets
   const pw=$("#presets");
   pw.innerHTML = Object.entries(PRESETS).map(([name,p])=>
@@ -1071,12 +1087,13 @@ async function renderEdit(){
       bakeEdits(c2, state.edit);
       const q=Math.min(100,Math.max(50,state.edit.quality))/100;
       let blob=await new Promise(res=>c2.toBlob(res,"image/jpeg",q));
+      if(!blob) throw new Error("JPEG encode failed on this device");
       blob=await withCopyright(blob);
       await idbPut("photos",{ id:uid(), projectId:photo.projectId, kind:"export", parentId:photo.id,
         name:photo.name.replace(/\.[^.]+$/,"")+"_retouched.jpg", blob, created:Date.now() });
       toast("AI retouch done on "+faces.length+" face"+(faces.length===1?"":"s")+". Saved as a new edited copy; original untouched.");
     }catch(e){
-      toast("AI retouch failed on this device");
+      toast("AI retouch failed: "+((e&&e.message)||e));
     }
     btnR.disabled=false; btnR.textContent="AI Face Retouch · smooth skin on detected faces, save as a new edited copy";
   });
@@ -1084,12 +1101,14 @@ async function renderEdit(){
   q.addEventListener("input", ()=>{ state.edit.quality=parseInt(q.value,10); $("#out-q").textContent=q.value+"%"; persistEdits(photo); });
   // before/after
   const img=$("#edit-img"), cmp=$("#compare-btn");
-  const showBefore=()=>{ img.style.filter="none"; cmp.textContent="RELEASE · AFTER"; };
-  const showAfter=()=>{ img.style.filter=filterString(state.edit); cmp.textContent="HOLD · BEFORE"; };
-  cmp.addEventListener("pointerdown", showBefore);
-  cmp.addEventListener("pointerup", showAfter);
-  cmp.addEventListener("pointercancel", showAfter);
-  cmp.addEventListener("pointerleave", showAfter);
+  const showBefore=()=>{ if(!img||!cmp) return; img.style.filter="none"; cmp.textContent="RELEASE · AFTER"; };
+  const showAfter=()=>{ if(!img||!cmp) return; img.style.filter=filterString(state.edit); cmp.textContent="HOLD · BEFORE"; };
+  if(cmp){
+    cmp.addEventListener("pointerdown", showBefore);
+    cmp.addEventListener("pointerup", showAfter);
+    cmp.addEventListener("pointercancel", showAfter);
+    cmp.addEventListener("pointerleave", showAfter);
+  }
   // export
   // photographer credit (EXIF) controls: explicit opt-in, values typed by the user
   const exOn=$("#exif-on"), exA=$("#exif-artist"), exC=$("#exif-copy");
@@ -1376,9 +1395,16 @@ async function ensureAI(){
   aiLoading=(async()=>{
     const v=await import(AI_BUNDLE);
     const fileset=await v.FilesetResolver.forVisionTasks(AI_WASM);
-    faceDetector=await v.FaceDetector.createFromOptions(fileset,{
-      baseOptions:{modelAssetPath:AI_MODEL}, runningMode:"IMAGE"
-    });
+    try{
+      faceDetector=await v.FaceDetector.createFromOptions(fileset,{
+        baseOptions:{modelAssetPath:AI_MODEL}, runningMode:"IMAGE"
+      });
+    }catch(gpuErr){
+      // iOS Safari can fail the GPU delegate; retry on CPU before giving up
+      faceDetector=await v.FaceDetector.createFromOptions(fileset,{
+        baseOptions:{modelAssetPath:AI_MODEL, delegate:"CPU"}, runningMode:"IMAGE"
+      });
+    }
     return faceDetector;
   })();
   try{ return await aiLoading; } finally{ aiLoading=null; }
@@ -1483,10 +1509,12 @@ function qBadge(a){
 }
 function loadImage(blob){
   return new Promise((res,rej)=>{
+    if(!blob || !(blob instanceof Blob) || !blob.size){ rej(new Error("Missing image data")); return; }
     const img=new Image();
-    img.onload=()=>res(img);
-    img.onerror=()=>rej(new Error("Could not decode image"));
-    img.src=URL.createObjectURL(blob);
+    const u=URL.createObjectURL(blob);
+    img.onload=()=>{ URL.revokeObjectURL(u); res(img); };
+    img.onerror=()=>{ URL.revokeObjectURL(u); rej(new Error("Could not decode image")); };
+    img.src=u;
   });
 }
 function esc(s){ return String(s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
@@ -1541,6 +1569,10 @@ window.addEventListener("DOMContentLoaded", async ()=>{
     e.target.value="";
   });
   if(storageMode==="session"){
+    const sb=document.createElement("div");
+    sb.style.cssText="position:fixed;left:12px;right:12px;bottom:76px;background:#3a2a12;border:1px solid #d4a857;color:#f5e6c8;padding:10px 12px;border-radius:12px;font-size:13px;z-index:60;line-height:1.45";
+    sb.textContent="This browser mode can't keep photos after you close the page. Open the app link in Safari (not inside another app) so your projects stay on this device.";
+    document.body.appendChild(sb);
     toast("Note: storage is session-only in this browser mode");
   }
   const hash = location.hash.replace("#","");
