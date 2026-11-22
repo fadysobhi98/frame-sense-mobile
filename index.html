@@ -187,7 +187,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Originals are never modified. Editing is non-destructive and exports are new JPEG copies, exactly as the Frame Sense specification requires.</span>
     </div>
-    <footer class="foot">Frame Sense Mobile · v1.7.18 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 and ARW verified; NEF / DNG untested) decodes on this device with the RAW file kept untouched, with optional wavelet noise reduction at decode. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Photographer credit (EXIF) is optional and off by default: nothing is embedded unless you switch it on and type the values; originals stay untouched. Desktop pairing is still planned.</footer>
+    <footer class="foot">Frame Sense Mobile · v1.7.19 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 and ARW verified; NEF / DNG untested) decodes on this device with the RAW file kept untouched, with optional wavelet noise reduction at decode. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Photographer credit (EXIF) is optional and off by default: nothing is embedded unless you switch it on and type the values; originals stay untouched. Desktop pairing is still planned.</footer>
   </section>
 
   <!-- PROJECTS -->
@@ -338,9 +338,20 @@ function idbFail(q, op){
   if(d) e.cause=d;
   return e;
 }
+/* A write is only durable when its TRANSACTION completes: request.onsuccess
+   can fire and the transaction still abort afterwards (e.g. quota at commit),
+   rolling the write back. Resolving at request level could report a record as
+   saved when it was never committed. Resolve on tx.oncomplete; reject on
+   request.onerror or tx.onabort, always naming the real DOMException. */
 function idbPut(store, val){
   if(!db){ mem[store].set(val.id, val); return Promise.resolve(); }
-  return new Promise((res,rej)=>{ const q=tx(store,"readwrite").put(val); q.onsuccess=()=>res(); q.onerror=()=>rej(idbFail(q,store+" write")); });
+  return new Promise((res,rej)=>{
+    const t=db.transaction(store,"readwrite");
+    const q=t.objectStore(store).put(val);
+    q.onerror=()=>rej(idbFail(q,store+" write"));
+    t.onabort=()=>rej(idbFail(t,store+" write"));
+    t.oncomplete=()=>res();
+  });
 }
 function idbGet(store, key){
   if(!db) return Promise.resolve(mem[store].get(key));
@@ -352,7 +363,13 @@ function idbAll(store){
 }
 function idbDel(store, key){
   if(!db){ mem[store].delete(key); return Promise.resolve(); }
-  return new Promise((res,rej)=>{ const q=tx(store,"readwrite").delete(key); q.onsuccess=()=>res(); q.onerror=()=>rej(idbFail(q,store+" delete")); });
+  return new Promise((res,rej)=>{
+    const t=db.transaction(store,"readwrite");
+    const q=t.objectStore(store).delete(key);
+    q.onerror=()=>rej(idbFail(q,store+" delete"));
+    t.onabort=()=>rej(idbFail(t,store+" delete"));
+    t.oncomplete=()=>res();
+  });
 }
 /* read back a freshly stored photo and try to decode it: catches a copy that
    went into device storage unreadable (truncated/empty write). Never deletes
@@ -1402,9 +1419,13 @@ async function renderEdit(){
 function sliderRow(label,k,min,max,step){
   return `<div class="slider-row"><span>${label}</span><input type="range" id="sl-${k}" min="${min}" max="${max}" step="${step}"><output id="out-${k}"></output></div>`;
 }
-async function persistEdits(photo){
+async function persistEdits(photo, keepShare){
   photo.edits = {...state.edit};
-  resetShareState(); // edits changed: a previously staged share file no longer matches
+  /* Slider/exif changes come here AFTER state.edit mutated, so a staged share
+     file no longer matches and must be unstaged. Export flows call this with
+     keepShare=true: they stage the file built from these exact settings, so
+     the write itself must not wipe the fresh stage. */
+  if(!keepShare) resetShareState();
   await idbPut("photos", photo);
 }
 async function updateCropPreview(photo){
@@ -1484,7 +1505,7 @@ async function doInstagramExport(photo){
     blob=await withCopyright(blob);
     if(!blob) throw new Error("JPEG encode failed on this device");
     let settingsSaved=true;
-    try{ await persistEdits(photo); }catch(_se){ settingsSaved=false; }
+    try{ await persistEdits(photo, true); }catch(_se){ settingsSaved=false; }
     const rec={ id:uid(), projectId:photo.projectId, kind:"export", parentId:photo.id,
       name:photo.name.replace(/\.[^.]+$/,"")+"_instagram.jpg", blob, created:Date.now() };
     try{ await idbPut("photos", rec); }
@@ -1521,25 +1542,26 @@ async function doExport(photo){
     blob = await withCopyright(blob);
     if(!blob) throw new Error("JPEG encode failed on this device");
     const fname=photo.name.replace(/\.[^.]+$/,"")+"_edited.jpg";
-    /* Project storage is not essential to keeping the photo. Build the JPEG
-       first; settings/record writes are attempted but their failure keeps the
-       staged shareable copy and says so plainly - never a fake save success.
-       persistEdits uses the in-memory state.edit, so building never depends on
-       a working settings write. */
+    /* Stage the shareable copy BEFORE any storage attempt: the image then
+       reaches the phone gallery even if a storage write hangs forever (the
+       share tap never waits on IndexedDB). Storage outcomes are then reported
+       honestly - never a fake save success. persistEdits uses the in-memory
+       state.edit, so building never depends on a working settings write. */
+    stageShare(blob, fname);
     let settingsSaved=true, recSaved=true, why="";
-    try{ await persistEdits(photo); }catch(e){ settingsSaved=false; why=(e&&e.message)||String(e); }
+    try{ await persistEdits(photo, true); }catch(e){ settingsSaved=false; why=(e&&e.message)||String(e); }
     const rec={ id:uid(), projectId:photo.projectId, kind:"export", parentId:photo.id, name:fname, blob, created:Date.now() };
     try{ await idbPut("photos", rec); }
     catch(e1){
-      /* a request error aborts its transaction before commit, so one retry
-         with the same record id cannot create a duplicate */
+      /* a request error or transaction abort means the write rolled back, so
+         one retry with the same record id cannot create a duplicate. A hung
+         write is never retried blindly: its outcome is unknown. */
       try{ await idbPut("photos", rec); }
       catch(e2){ recSaved=false; why=(e2&&e2.message)||String(e2); }
     }
-    stageShare(blob, fname);
     if(recSaved && settingsSaved) toast("Edited JPEG saved inside the project");
     else if(recSaved) toast("Edited JPEG saved inside the project. Your latest slider settings could not be stored ("+why+")");
-    else toast("Export built, but this device could not store it in the project ("+why+"). Tap Save to phone gallery to keep the edited JPEG in Photos");
+    else toast("Export built, but this device could not store it in the project ("+why+"). The edited copy stays only on this screen - tap Save to phone gallery now to keep it");
   }catch(e){
     toast("Export failed: "+(e.message||e));
   }finally{
