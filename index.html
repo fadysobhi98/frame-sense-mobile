@@ -187,7 +187,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Originals are never modified. Editing is non-destructive and exports are new JPEG copies, exactly as the Frame Sense specification requires.</span>
     </div>
-    <footer class="foot">Frame Sense Mobile · v1.7.17 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 and ARW verified; NEF / DNG untested) decodes on this device with the RAW file kept untouched, with optional wavelet noise reduction at decode. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Photographer credit (EXIF) is optional and off by default: nothing is embedded unless you switch it on and type the values; originals stay untouched. Desktop pairing is still planned.</footer>
+    <footer class="foot">Frame Sense Mobile · v1.7.18 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 and ARW verified; NEF / DNG untested) decodes on this device with the RAW file kept untouched, with optional wavelet noise reduction at decode. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Photographer credit (EXIF) is optional and off by default: nothing is embedded unless you switch it on and type the values; originals stay untouched. Desktop pairing is still planned.</footer>
   </section>
 
   <!-- PROJECTS -->
@@ -328,21 +328,31 @@ function openDB(){
   });
 }
 function tx(store, mode){ return db.transaction(store, mode).objectStore(store); }
+/* storage failures must carry the real DOMException (QuotaExceededError,
+   UnknownError, ...), not the raw DOM Event - an Event stringifies as
+   "[object Event]", which hid the actual failure name on Fady's iPhone.
+   The DOMException is preserved as .cause. */
+function idbFail(q, op){
+  const d=q && q.error;
+  const e=new Error(op+" failed: "+(d ? (d.name||"Error")+(d.message?": "+d.message:"") : "unknown storage error"));
+  if(d) e.cause=d;
+  return e;
+}
 function idbPut(store, val){
   if(!db){ mem[store].set(val.id, val); return Promise.resolve(); }
-  return new Promise((res,rej)=>{ const q=tx(store,"readwrite").put(val); q.onsuccess=()=>res(); q.onerror=e=>rej(e); });
+  return new Promise((res,rej)=>{ const q=tx(store,"readwrite").put(val); q.onsuccess=()=>res(); q.onerror=()=>rej(idbFail(q,store+" write")); });
 }
 function idbGet(store, key){
   if(!db) return Promise.resolve(mem[store].get(key));
-  return new Promise((res,rej)=>{ const q=tx(store,"readonly").get(key); q.onsuccess=()=>res(q.result); q.onerror=e=>rej(e); });
+  return new Promise((res,rej)=>{ const q=tx(store,"readonly").get(key); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(idbFail(q,store+" read")); });
 }
 function idbAll(store){
   if(!db) return Promise.resolve([...mem[store].values()]);
-  return new Promise((res,rej)=>{ const q=tx(store,"readonly").getAll(); q.onsuccess=()=>res(q.result||[]); q.onerror=e=>rej(e); });
+  return new Promise((res,rej)=>{ const q=tx(store,"readonly").getAll(); q.onsuccess=()=>res(q.result||[]); q.onerror=()=>rej(idbFail(q,store+" read")); });
 }
 function idbDel(store, key){
   if(!db){ mem[store].delete(key); return Promise.resolve(); }
-  return new Promise((res,rej)=>{ const q=tx(store,"readwrite").delete(key); q.onsuccess=()=>res(); q.onerror=e=>rej(e); });
+  return new Promise((res,rej)=>{ const q=tx(store,"readwrite").delete(key); q.onsuccess=()=>res(); q.onerror=()=>rej(idbFail(q,store+" delete")); });
 }
 /* read back a freshly stored photo and try to decode it: catches a copy that
    went into device storage unreadable (truncated/empty write). Never deletes
@@ -682,7 +692,12 @@ async function renderGallery(){
     return;
   }
   $("#gallery-sub").textContent = proj.name;
-  const all = (await idbAll("photos")).filter(x=>x.projectId===proj.id);
+  let all;
+  try{ all = (await idbAll("photos")).filter(x=>x.projectId===proj.id); }
+  catch(e){
+    body.innerHTML = `<div class="empty">Photos could not be read from this device's storage (${esc(String((e&&e.message)||e))}). Your originals are not deleted by reading failures; try reopening the app.</div>`;
+    return;
+  }
   const originals = all.filter(x=>x.kind==="original");
   const exports_ = all.filter(x=>x.kind==="export");
   const tab = state.galleryTab;
@@ -1467,13 +1482,17 @@ async function doInstagramExport(photo){
     const q=Math.min(100,Math.max(50,state.edit.quality))/100;
     let blob=await new Promise(res=>canvas.toBlob(res,"image/jpeg",q));
     blob=await withCopyright(blob);
-    if(!blob) throw new Error("Export failed");
-    await persistEdits(photo);
-    await idbPut("photos", {
-      id:uid(), projectId:photo.projectId, kind:"export", parentId:photo.id,
-      name:photo.name.replace(/\.[^.]+$/,"")+"_instagram.jpg", blob, created:Date.now()
-    });
-    toast("Instagram copy saved inside the project (max 1080 px, JPEG)");
+    if(!blob) throw new Error("JPEG encode failed on this device");
+    let settingsSaved=true;
+    try{ await persistEdits(photo); }catch(_se){ settingsSaved=false; }
+    const rec={ id:uid(), projectId:photo.projectId, kind:"export", parentId:photo.id,
+      name:photo.name.replace(/\.[^.]+$/,"")+"_instagram.jpg", blob, created:Date.now() };
+    try{ await idbPut("photos", rec); }
+    catch(e1){
+      /* request error => transaction aborted before commit; same-id retry is safe */
+      try{ await idbPut("photos", rec); }catch(e2){ throw e2; }
+    }
+    toast("Instagram copy saved inside the project (max 1080 px, JPEG)"+(settingsSaved?"":". Your latest slider settings could not be stored"));
   }catch(e){
     toast("Instagram export failed: "+(e.message||e));
   }finally{
@@ -1500,15 +1519,27 @@ async function doExport(photo){
     const q = Math.min(100, Math.max(50, state.edit.quality))/100;
     let blob = await new Promise(res=>canvas.toBlob(res,"image/jpeg",q));
     blob = await withCopyright(blob);
-    if(!blob) throw new Error("Export failed");
-    await persistEdits(photo);
+    if(!blob) throw new Error("JPEG encode failed on this device");
     const fname=photo.name.replace(/\.[^.]+$/,"")+"_edited.jpg";
-    await idbPut("photos", {
-      id:uid(), projectId:photo.projectId, kind:"export", parentId:photo.id,
-      name:fname, blob, created:Date.now()
-    });
-    toast("Edited JPEG saved inside the project");
+    /* Project storage is not essential to keeping the photo. Build the JPEG
+       first; settings/record writes are attempted but their failure keeps the
+       staged shareable copy and says so plainly - never a fake save success.
+       persistEdits uses the in-memory state.edit, so building never depends on
+       a working settings write. */
+    let settingsSaved=true, recSaved=true, why="";
+    try{ await persistEdits(photo); }catch(e){ settingsSaved=false; why=(e&&e.message)||String(e); }
+    const rec={ id:uid(), projectId:photo.projectId, kind:"export", parentId:photo.id, name:fname, blob, created:Date.now() };
+    try{ await idbPut("photos", rec); }
+    catch(e1){
+      /* a request error aborts its transaction before commit, so one retry
+         with the same record id cannot create a duplicate */
+      try{ await idbPut("photos", rec); }
+      catch(e2){ recSaved=false; why=(e2&&e2.message)||String(e2); }
+    }
     stageShare(blob, fname);
+    if(recSaved && settingsSaved) toast("Edited JPEG saved inside the project");
+    else if(recSaved) toast("Edited JPEG saved inside the project. Your latest slider settings could not be stored ("+why+")");
+    else toast("Export built, but this device could not store it in the project ("+why+"). Tap Save to phone gallery to keep the edited JPEG in Photos");
   }catch(e){
     toast("Export failed: "+(e.message||e));
   }finally{
