@@ -101,6 +101,7 @@ input:focus,select:focus{border-color:var(--gold2)}
 .thumb img{width:100%; height:100%; object-fit:cover; display:block}
 .thumb.broken{display:flex;align-items:center;justify-content:center;min-height:80px}
 .thumb.broken::after{content:"Can't read here";font-size:10px;color:var(--muted);text-align:center;padding:6px;line-height:1.4}
+.thumb.broken .q-badge{display:none}
 .broken-photo{color:var(--muted);font-size:14px;line-height:1.55;padding:48px 20px;text-align:center}
 .q-badge{
   position:absolute; left:4px; bottom:4px; font-size:9px; font-weight:800; letter-spacing:.4px;
@@ -186,7 +187,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Originals are never modified. Editing is non-destructive and exports are new JPEG copies, exactly as the Frame Sense specification requires.</span>
     </div>
-    <footer class="foot">Frame Sense Mobile · v1.7.12 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 and ARW verified; NEF / DNG untested) decodes on this device with the RAW file kept untouched, with optional wavelet noise reduction at decode. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Photographer credit (EXIF) is optional and off by default: nothing is embedded unless you switch it on and type the values; originals stay untouched. Desktop pairing is still planned.</footer>
+    <footer class="foot">Frame Sense Mobile · v1.7.13 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 and ARW verified; NEF / DNG untested) decodes on this device with the RAW file kept untouched, with optional wavelet noise reduction at decode. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Photographer credit (EXIF) is optional and off by default: nothing is embedded unless you switch it on and type the values; originals stay untouched. Desktop pairing is still planned.</footer>
   </section>
 
   <!-- PROJECTS -->
@@ -559,7 +560,7 @@ async function renderProjects(){
         return;
       }
       const ph=(await idbAll("photos")).filter(p=>p.projectId===proj.id);
-      for(const p of ph) await idbDel("photos", p.id);
+      for(const p of ph){ await idbDel("photos", p.id); await thumbCacheDel(p.id); }
       await idbDel("projects", proj.id);
       state.activeProjectId=null; state.editPhotoId=null;
       await loadProjects();
@@ -574,8 +575,80 @@ async function renderProjects(){
 const liveURLs=new Set();
 function trackURL(u){ liveURLs.add(u); return u; }
 function revokeTrackedURLs(){ for(const u of liveURLs){ try{ URL.revokeObjectURL(u); }catch(_){} } liveURLs.clear(); }
+/* Thumbnails: the grid must never decode full camera-size originals - on phones
+   that is what breaks every tile at once and stalls the view. Small JPEG thumbs
+   (max 640 px) are cached in a dedicated Cache-storage bucket (no IndexedDB schema
+   change, so no upgrade can ever block or hide photo records), so reopening the
+   gallery needs no full-size decode at all. Generation guard stops stale async
+   passes after a re-render so in-flight loads are not revoked under their images. */
+let thumbGen=0;
+const THUMB_CACHE="framesense-thumbs";
+const thumbsMem=new Map();
+async function thumbCacheGet(id){
+  try{
+    if(window.caches && caches.open){
+      const r=await (await caches.open(THUMB_CACHE)).match("/thumb/"+id);
+      if(r) return await r.blob();
+    }
+  }catch(_){}
+  return thumbsMem.get(id) || null;
+}
+async function thumbCachePut(id, blob){
+  thumbsMem.set(id, blob);
+  try{
+    if(window.caches && caches.open){
+      await (await caches.open(THUMB_CACHE)).put("/thumb/"+id, new Response(blob, {headers:{"Content-Type":"image/jpeg"}}));
+    }
+  }catch(_){}
+}
+async function thumbCacheDel(id){
+  thumbsMem.delete(id);
+  try{ if(window.caches && caches.open) await (await caches.open(THUMB_CACHE)).delete("/thumb/"+id); }catch(_){}
+}
+async function makeThumbBlob(blob){
+  const bmp=await createImageBitmap(blob);
+  const s=Math.min(1,640/Math.max(bmp.width,bmp.height));
+  const w=Math.max(1,Math.round(bmp.width*s)), h=Math.max(1,Math.round(bmp.height*s));
+  const c=document.createElement("canvas"); c.width=w; c.height=h;
+  c.getContext("2d").drawImage(bmp,0,0,w,h);
+  if(bmp.close) bmp.close();
+  const b=await new Promise(r=>c.toBlob(r,"image/jpeg",0.8));
+  if(!b) throw new Error("thumb encode failed");
+  return b;
+}
+async function fillThumbs(scopeEl, gen){
+  const tiles=[...scopeEl.querySelectorAll(".thumb")];
+  if(!tiles.length) return;
+  let i=0;
+  async function worker(){
+    while(i<tiles.length){
+      const tile=tiles[i++];
+      if(gen!==thumbGen) return;
+      const img=tile.querySelector("img"); if(!img) continue;
+      const pid=tile.dataset.phid;
+      try{
+        let tb=await thumbCacheGet(pid);
+        if(!tb){
+          const p=await idbGet("photos", pid);
+          if(!p||!p.blob) continue;
+          tb=await makeThumbBlob(p.blob);
+          await thumbCachePut(pid, tb);
+        }
+        if(gen!==thumbGen) return;
+        img.src=trackURL(URL.createObjectURL(tb));
+      }catch(_){
+        /* thumb generation failed: fall back to the original blob; if that also
+           fails, the img onerror marks the tile unreadable (nothing deleted) */
+        if(gen!==thumbGen) return;
+        try{ const p=await idbGet("photos", pid); if(p&&p.blob) img.src=trackURL(URL.createObjectURL(p.blob)); }catch(__){}
+      }
+    }
+  }
+  await Promise.all([worker(),worker()]);
+}
 async function renderGallery(){
   revokeTrackedURLs();
+  const gen=++thumbGen;
   const body=$("#gallery-body");
   const proj=activeProject();
   if(!proj){
@@ -599,7 +672,7 @@ async function renderGallery(){
         const sections=order.map(([key,label])=>{
           const v=shown.filter(p=>((p.scene&&p.scene.key)||"other")===key);
           if(!v.length) return "";
-          return `<div class="eyebrow" style="margin-top:10px">${label} (${v.length})</div><div class="grid">${v.map(p=>`<div class="thumb" data-phid="${p.id}" data-kind="${p.kind}"><img src="${trackURL(URL.createObjectURL(p.blob))}" alt="" onerror="const t=this.closest('.thumb'); if(t) t.classList.add('broken'); this.remove();">${qBadge(p.analysis)}</div>`).join("")}</div>`;
+          return `<div class="eyebrow" style="margin-top:10px">${label} (${v.length})</div><div class="grid">${v.map(p=>`<div class="thumb" data-phid="${p.id}" data-kind="${p.kind}"><img alt="" loading="lazy" decoding="async" onerror="const t=this.closest('.thumb'); if(t) t.classList.add('broken'); this.remove();">${qBadge(p.analysis)}</div>`).join("")}</div>`;
         }).join("");
         return sections + `<div class="note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg><span>Scene groups are experimental zero-shot guesses from a small on-device model; photos it is unsure about land in Uncertain &amp; Other. Check before relying on them.</span></div>`;
       })() : state.galleryGroup&&tab==="originals" ? (()=>{
@@ -607,9 +680,9 @@ async function renderGallery(){
         return grp.map(([label,test])=>{
           const v=shown.filter(test);
           if(!v.length) return "";
-          return `<div class="eyebrow" style="margin-top:10px">${label}</div><div class="grid">${v.map(p=>`<div class="thumb" data-phid="${p.id}" data-kind="${p.kind}"><img src="${trackURL(URL.createObjectURL(p.blob))}" alt="" onerror="const t=this.closest('.thumb'); if(t) t.classList.add('broken'); this.remove();">${qBadge(p.analysis)+(p.best?` <span class="q-badge" style="background:#d4a857;color:#171310">&#9733; Best Shot</span>`:"")}</div>`).join("")}</div>`;
+          return `<div class="eyebrow" style="margin-top:10px">${label}</div><div class="grid">${v.map(p=>`<div class="thumb" data-phid="${p.id}" data-kind="${p.kind}"><img alt="" loading="lazy" decoding="async" onerror="const t=this.closest('.thumb'); if(t) t.classList.add('broken'); this.remove();">${qBadge(p.analysis)+(p.best?` <span class="q-badge" style="background:#d4a857;color:#171310">&#9733; Best Shot</span>`:"")}</div>`).join("")}</div>`;
         }).join("");
-      })() : `<div class="grid">${shown.map(p=>`<div class="thumb" data-phid="${p.id}" data-kind="${p.kind}"><img src="${trackURL(URL.createObjectURL(p.blob))}" alt="" onerror="const t=this.closest('.thumb'); if(t) t.classList.add('broken'); this.remove();">${p.kind==="original"?(p.raw?`<span class="q-badge" style="top:4px;bottom:auto">RAW · JPEG working copy</span> `:"")+qBadge(p.analysis)+(p.best?` <span class="q-badge" style="background:#d4a857;color:#171310">&#9733; Best Shot</span>`:""):""}</div>`).join("")}</div>`}
+      })() : `<div class="grid">${shown.map(p=>`<div class="thumb" data-phid="${p.id}" data-kind="${p.kind}"><img alt="" loading="lazy" decoding="async" onerror="const t=this.closest('.thumb'); if(t) t.classList.add('broken'); this.remove();">${p.kind==="original"?(p.raw?`<span class="q-badge" style="top:4px;bottom:auto">RAW · JPEG working copy</span> `:"")+qBadge(p.analysis)+(p.best?` <span class="q-badge" style="background:#d4a857;color:#171310">&#9733; Best Shot</span>`:""):""}</div>`).join("")}</div>`}
     ${tab==="originals"&&shown.length?`<div class="note">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Badges are basic exposure/focus checks computed on this device, a small honest subset of the planned AI Smart Review, not full AI analysis.</span>
@@ -657,6 +730,7 @@ async function renderGallery(){
   body.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click", ()=>{
     state.galleryTab=b.dataset.tab; renderGallery();
   }));
+  fillThumbs(body, gen);
   body.querySelectorAll(".thumb").forEach(t=>t.addEventListener("click", ()=>{
     if(state.collageMode){
       if(t.dataset.kind!=="original"){ toast("Collages are built from originals"); return; }
@@ -1225,8 +1299,9 @@ async function renderEdit(){
       return;
     }
     const exportsOf=(await idbAll("photos")).filter(p=>p.parentId===photo.id);
-    for(const e of exportsOf) await idbDel("photos", e.id);
+    for(const e of exportsOf){ await idbDel("photos", e.id); await thumbCacheDel(e.id); }
     await idbDel("photos", photo.id);
+    await thumbCacheDel(photo.id);
     state.editPhotoId=null;
     toast("Photo removed from project");
     document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("active", b.dataset.view==="gallery"));
