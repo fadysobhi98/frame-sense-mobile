@@ -187,7 +187,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Originals are never modified. Editing is non-destructive and exports are new JPEG copies, exactly as the Frame Sense specification requires.</span>
     </div>
-    <footer class="foot">Frame Sense Mobile · v1.7.15 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 and ARW verified; NEF / DNG untested) decodes on this device with the RAW file kept untouched, with optional wavelet noise reduction at decode. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Photographer credit (EXIF) is optional and off by default: nothing is embedded unless you switch it on and type the values; originals stay untouched. Desktop pairing is still planned.</footer>
+    <footer class="foot">Frame Sense Mobile · v1.7.16 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 and ARW verified; NEF / DNG untested) decodes on this device with the RAW file kept untouched, with optional wavelet noise reduction at decode. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Photographer credit (EXIF) is optional and off by default: nothing is embedded unless you switch it on and type the values; originals stay untouched. Desktop pairing is still planned.</footer>
   </section>
 
   <!-- PROJECTS -->
@@ -365,7 +365,7 @@ async function idbPutPhotoVerified(val){
 const uid = ()=> Date.now().toString(36) + Math.random().toString(36).slice(2,8);
 
 /* ---------- state ---------- */
-const state = { projects:[], activeProjectId:null, editPhotoId:null, edit:null, galleryTab:"originals", collageMode:false, collageSel:[] };
+const state = { projects:[], activeProjectId:null, editPhotoId:null, edit:null, editImgEl:null, editImgId:null, editImgGen:0, galleryTab:"originals", collageMode:false, collageSel:[] };
 
 const PRESETS = {
   "FS Basic":  {b:1.02, c:1.06, s:1.08, w:0.04, note:"Approved baseline"},
@@ -472,7 +472,12 @@ document.querySelectorAll("nav button").forEach(btn=>{
     showView(btn.dataset.view);
   });
 });
+/* Release the retained decoded edit image and invalidate any in-flight decode
+   from a previous photo/view. The retained element is bound to a photo id, so
+   exports can never draw pixels from a photo that is no longer open. */
+function releaseEditImg(){ state.editImgEl=null; state.editImgId=null; state.editImgGen++; }
 function showView(name){
+  if(name!=="edit") releaseEditImg();
   document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));
   $("#view-"+name).classList.add("active");
   if(name==="home") renderHome();
@@ -563,6 +568,7 @@ async function renderProjects(){
       for(const p of ph){ await idbDel("photos", p.id); await thumbCacheDel(p.id); }
       await idbDel("projects", proj.id);
       state.activeProjectId=null; state.editPhotoId=null;
+      releaseEditImg();
       await loadProjects();
       toast("Project deleted");
       renderProjects(); renderHome();
@@ -1042,6 +1048,7 @@ async function importFiles(files){
 /* ---------- edit ---------- */
 async function renderEdit(){
   revokeTrackedURLs();
+  const imgGen=++state.editImgGen;
   const body=$("#edit-body");
   const photo = state.editPhotoId ? await idbGet("photos", state.editPhotoId) : null;
   if(!photo || photo.kind!=="original"){
@@ -1055,7 +1062,13 @@ async function renderEdit(){
   state.edit = {...saved};
   $("#edit-sub").textContent = photo.raw ? photo.raw.name + " · RAW original stored untouched · you are editing its JPEG working copy" : photo.name + " · non-destructive, original untouched";
   let decodeOk=true, url="";
-  try{ await loadImage(photo.blob); url=await previewURL(photo); }
+  state.editImgEl=null; state.editImgId=null;
+  try{ const el=await loadImage(photo.blob); url=await previewURL(photo);
+    /* a newer renderEdit (photo switch / view change) may have started while
+       this decode was in flight: discard the late source and UI write */
+    if(imgGen!==state.editImgGen || state.editPhotoId!==photo.id) return;
+    state.editImgEl=el; state.editImgId=photo.id;
+  }
   catch(_){ decodeOk=false; }
   /* for an unreadable saved copy, describe what the stored bytes look like:
      size + format hint from the first bytes. A hint only - it cannot prove
@@ -1190,10 +1203,11 @@ async function renderEdit(){
     btnR.disabled=true; btnR.textContent="Detecting faces on this device…";
     try{
       await ensureAI();
-      const img=await loadImage(photo.blob);
+      const img=await exportImageSource(photo);
+      const iw=img.naturalWidth||img.width, ih=img.naturalHeight||img.height;
       const cap=1600;
-      const sc=Math.min(1, cap/Math.max(img.naturalWidth,img.naturalHeight));
-      const W=Math.round(img.naturalWidth*sc), H=Math.round(img.naturalHeight*sc);
+      const sc=Math.min(1, cap/Math.max(iw,ih));
+      const W=Math.round(iw*sc), H=Math.round(ih*sc);
       const c=document.createElement("canvas"); c.width=W; c.height=H;
       const x=c.getContext("2d"); x.drawImage(img,0,0,W,H);
       const boxes=await detectFaceBoxes(c);
@@ -1336,6 +1350,7 @@ async function renderEdit(){
     const exportsOf=(await idbAll("photos")).filter(p=>p.parentId===photo.id);
     for(const e of exportsOf){ await idbDel("photos", e.id); await thumbCacheDel(e.id); }
     await idbDel("photos", photo.id);
+    releaseEditImg();
     await thumbCacheDel(photo.id);
     state.editPhotoId=null;
     toast("Photo removed from project");
@@ -1379,17 +1394,18 @@ async function updateCropPreview(photo){
   $("#sl-cropx").value=String(cx); $("#sl-cropy").value=String(cy);
 }
 async function buildExportCanvas(photo, maxDim){
-  const img = await loadImage(photo.blob);
+  const img = await exportImageSource(photo);
+  const iw=img.naturalWidth||img.width, ih=img.naturalHeight||img.height;
   let canvas=document.createElement("canvas");
   const rot=state.edit.rot||0, scale=(state.edit.scale||100)/100;
   const swap=rot===90||rot===270;
-  canvas.width=Math.max(1,Math.round((swap?img.naturalHeight:img.naturalWidth)*scale));
-  canvas.height=Math.max(1,Math.round((swap?img.naturalWidth:img.naturalHeight)*scale));
+  canvas.width=Math.max(1,Math.round((swap?ih:iw)*scale));
+  canvas.height=Math.max(1,Math.round((swap?iw:ih)*scale));
   const ctx=canvas.getContext("2d");
   ctx.translate(canvas.width/2, canvas.height/2);
   ctx.rotate(rot*Math.PI/180);
   ctx.scale(scale, scale);
-  ctx.drawImage(img,-img.naturalWidth/2,-img.naturalHeight/2);
+  ctx.drawImage(img,-iw/2,-ih/2);
   const crop=state.edit.crop||"none";
   if(crop!=="none"){
     const parts=crop.split(":"), aspect=parseFloat(parts[0])/parseFloat(parts[1]);
@@ -1712,6 +1728,23 @@ function loadImage(blob){
     img.src=u;
   });
 }
+/* Export/retouch image source: reuse the full-resolution image element the edit
+   view already decoded for this photo instead of decoding the original blob a
+   second time. On iOS that redundant second <img> decode of the same bytes can
+   be refused ("Could not decode image") while the first decode - done moments
+   earlier when the edit view rendered - succeeded, which is exactly the
+   rendered-but-export-fails state Fady hit. If no session element is available,
+   decode via <img>; if that fails, try createImageBitmap, a separate decoder
+   path in WebKit that can succeed where the <img> pipeline refuses. */
+async function exportImageSource(photo){
+  const el=state.editImgEl;
+  if(state.editImgId===photo.id && el && el.complete && el.naturalWidth>0) return el;
+  try{ return await loadImage(photo.blob); }
+  catch(e1){
+    try{ return await createImageBitmap(photo.blob); }
+    catch(_e2){ throw e1; }
+  }
+}
 function esc(s){ return String(s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 
 /* ---------- boot ---------- */
@@ -1760,6 +1793,7 @@ window.addEventListener("DOMContentLoaded", async ()=>{
     showView("projects");
   });
   $("#file-input").addEventListener("change", e=>{
+    releaseEditImg();
     if(e.target.files.length) importFiles([...e.target.files]);
     e.target.value="";
   });
@@ -1791,4 +1825,4 @@ window.addEventListener("DOMContentLoaded", async ()=>{
   </div>
 </div>
 </body>
-</html>
+  </html>
