@@ -1,6 +1,6 @@
 /* Frame Sense service worker: app-shell cache so the app opens offline.
    Photos and projects live in IndexedDB on the device, not in this cache. */
-const CACHE = "framesense-v1.4.2";
+const CACHE = "framesense-v1.5";
 /* AI engine files (mediapipe bundle/wasm/model, ~10 MB) live in a separate cache
    that survives app-shell updates, so users keep the engine they approved. */
 const AI_CACHE = "framesense-ai";
@@ -28,7 +28,7 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
-  const bucket = /mediapipe|tasks-vision|googleapis/.test(event.request.url) ? AI_CACHE : CACHE;
+  const bucket = /mediapipe|tasks-vision|googleapis|huggingface|hf\.co|onnxruntime|jsdelivr/.test(event.request.url) ? AI_CACHE : CACHE;
   event.respondWith(
     caches.open(bucket).then((cache) =>
       cache.match(event.request).then((cached) => {
