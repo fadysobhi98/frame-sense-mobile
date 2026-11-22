@@ -1,6 +1,7 @@
 /* Frame Sense service worker: app-shell cache so the app opens offline.
    Photos and projects live in IndexedDB on the device, not in this cache. */
-const CACHE = "framesense-v1.7.3";
+/* Bump this version on every release: the changed bytes make browsers install the
+   new worker on the next visit, so old installed clients self-update. */ const CACHE = "framesense-v1.7.8";
 /* AI engine files (mediapipe bundle/wasm/model, ~10 MB) live in a separate cache
    that survives app-shell updates, so users keep the engine they approved. */
 const AI_CACHE = "framesense-ai";
