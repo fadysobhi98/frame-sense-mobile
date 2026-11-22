@@ -187,7 +187,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Originals are never modified. Editing is non-destructive and exports are new JPEG copies, exactly as the Frame Sense specification requires.</span>
     </div>
-    <footer class="foot">Frame Sense Mobile · v1.7.13 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 and ARW verified; NEF / DNG untested) decodes on this device with the RAW file kept untouched, with optional wavelet noise reduction at decode. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Photographer credit (EXIF) is optional and off by default: nothing is embedded unless you switch it on and type the values; originals stay untouched. Desktop pairing is still planned.</footer>
+    <footer class="foot">Frame Sense Mobile · v1.7.14 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 and ARW verified; NEF / DNG untested) decodes on this device with the RAW file kept untouched, with optional wavelet noise reduction at decode. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Photographer credit (EXIF) is optional and off by default: nothing is embedded unless you switch it on and type the values; originals stay untouched. Desktop pairing is still planned.</footer>
   </section>
 
   <!-- PROJECTS -->
@@ -379,7 +379,7 @@ const PRESETS = {
 const $ = s=>document.querySelector(s);
 function toast(msg){
   const t=$("#toast"); t.textContent=msg; t.classList.add("show");
-  clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove("show"), 2600);
+  clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove("show"), Math.max(2600, msg.length*70));
 }
 function filterString(e){
   return `brightness(${e.b.toFixed(3)}) contrast(${e.c.toFixed(3)}) saturate(${e.s.toFixed(3)}) sepia(${e.w.toFixed(3)})`;
@@ -1118,7 +1118,7 @@ async function renderEdit(){
       </div>
       <div class="row2">
         <button class="btn btn-gold" id="ex-save">Export to project</button>
-        <button class="btn btn-ghost" id="ex-save-copy" disabled>Save to phone gallery</button>
+        <button class="btn btn-ghost" id="ex-save-copy">Save to phone gallery</button>
       </div>
       <button class="btn btn-ghost" id="ex-instagram" style="margin-top:8px">Instagram copy · 1080 px, saved to project</button>
     </div>
@@ -1219,6 +1219,15 @@ async function renderEdit(){
       x2.translate(c2.width/2,c2.height/2); x2.rotate(rot*Math.PI/180); x2.scale(scale,scale);
       x2.drawImage(c,-W/2,-H/2);
       bakeEdits(c2, state.edit);
+      try{
+        const cx=c2.getContext("2d"), pts=[[0.5,0.5],[0.1,0.1],[0.9,0.9],[0.1,0.9],[0.9,0.1]];
+        let transparent=true;
+        for(const [fx,fy] of pts){
+          const d=cx.getImageData(Math.min(c2.width-1,Math.floor(c2.width*fx)),Math.min(c2.height-1,Math.floor(c2.height*fy)),1,1).data;
+          if(d[3]>0){ transparent=false; break; }
+        }
+        if(transparent) throw new Error("This device ran out of canvas memory and the retouch came out blank. Nothing was saved; try again after closing other apps or tabs.");
+      }catch(e){ if(e && /canvas memory/.test(e.message)) throw e; }
       const q=Math.min(100,Math.max(50,state.edit.quality))/100;
       let blob=await new Promise(res=>c2.toBlob(res,"image/jpeg",q));
       if(!blob) throw new Error("JPEG encode failed on this device");
@@ -1372,6 +1381,21 @@ async function buildExportCanvas(photo, maxDim){
     canvas=c3;
   }
   bakeEdits(canvas, state.edit);
+  /* iOS Safari silently purges canvas backing stores past its memory budget and
+     then returns all-zero pixels: without this check the app would save a blank
+     JPEG and report success. Only a fully transparent canvas counts as blank, so
+     real (even very dark) photos never false-trip. */
+  try{
+    const cx=canvas.getContext("2d"), pts=[[0.5,0.5],[0.1,0.1],[0.9,0.9],[0.1,0.9],[0.9,0.1]];
+    let transparent=true;
+    for(const [fx,fy] of pts){
+      const d=cx.getImageData(Math.min(canvas.width-1,Math.floor(canvas.width*fx)),Math.min(canvas.height-1,Math.floor(canvas.height*fy)),1,1).data;
+      if(d[3]>0){ transparent=false; break; }
+    }
+    if(transparent) throw new Error("blank-canvas");
+  }catch(e){
+    if(e && e.message==="blank-canvas") throw new Error("This device ran out of canvas memory and the export came out blank. Nothing was saved; try a smaller Dimensions setting and export again.");
+  }
   return canvas;
 }
 async function doInstagramExport(photo){
@@ -1577,8 +1601,19 @@ function smoothSkin(ctx, bx, by, bw, bh){
   const region=ctx.getImageData(bx,by,bw,bh);
   const bc=document.createElement("canvas"); bc.width=bw; bc.height=bh;
   const bx2=bc.getContext("2d");
-  bx2.filter="blur(3px)";
-  bx2.drawImage(ctx.canvas, bx,by,bw,bh, 0,0,bw,bh);
+  if(typeof bx2.filter==="string"){
+    bx2.filter="blur(3px)";
+    bx2.drawImage(ctx.canvas, bx,by,bw,bh, 0,0,bw,bh);
+  }else{
+    /* canvas filter unsupported (Safari before iOS 18 silently ignores it, which
+       made retouch save a copy with no visible change): blur by downscale/upscale */
+    const ds=document.createElement("canvas");
+    ds.width=Math.max(1,Math.round(bw*0.25)); ds.height=Math.max(1,Math.round(bh*0.25));
+    const dx=ds.getContext("2d"); dx.imageSmoothingEnabled=true; dx.imageSmoothingQuality="high";
+    dx.drawImage(ctx.canvas, bx,by,bw,bh, 0,0,ds.width,ds.height);
+    bx2.imageSmoothingEnabled=true; bx2.imageSmoothingQuality="high";
+    bx2.drawImage(ds, 0,0,ds.width,ds.height, 0,0,bw,bh);
+  }
   const blur=bx2.getImageData(0,0,bw,bh);
   const d=region.data, b=blur.data;
   for(let i=0;i<d.length;i+=4){
