@@ -183,7 +183,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Originals are never modified. Editing is non-destructive and exports are new JPEG copies, exactly as the Frame Sense specification requires.</span>
     </div>
-    <footer class="foot">Frame Sense Mobile · v1.7.3 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 verified; NEF / ARW / DNG untested) decodes on this device with the RAW file kept untouched. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Exported JPEGs carry your name as photographer copyright (EXIF); originals stay untouched. Desktop pairing is still planned.</footer>
+    <footer class="foot">Frame Sense Mobile · v1.7.4 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 verified; NEF / ARW / DNG untested) decodes on this device with the RAW file kept untouched. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Photographer credit (EXIF) is optional and off by default: nothing is embedded unless you switch it on and type the values; originals stay untouched. Desktop pairing is still planned.</footer>
   </section>
 
   <!-- PROJECTS -->
@@ -347,18 +347,28 @@ function filterString(e){
 }
 // Bake the same edits into pixels. Needed because iOS Safari ignores canvas ctx.filter,
 // which silently exported the "before" image. This path works everywhere.
-/* Photographer copyright (EXIF): embeds the on-device profile name into exported JPEG
-   metadata (Artist + Copyright + Software). Export-only, originals untouched.
-   Uses the vendored piexif library (./vendor/piexif.js, MIT). Any failure returns
-   the original blob so export can never break because of metadata. */
+/* Photographer credit (EXIF): explicit opt-in only. Nothing is embedded unless the
+   user switches it on AND types the values themselves; the greeting name (fsName)
+   is never used as a rights claim. Export-only, originals untouched. Uses the
+   vendored piexif library (./vendor/piexif.js, MIT). Any failure returns the
+   original blob so export can never break because of metadata. */
+function exifPrefs(){
+  try{
+    return {
+      on: localStorage.getItem("fsExifOn")==="1",
+      artist: (localStorage.getItem("fsExifArtist")||"").trim(),
+      copyr: (localStorage.getItem("fsExifCopy")||"").trim()
+    };
+  }catch(_){ return {on:false, artist:"", copyr:""}; }
+}
 async function withCopyright(blob){
   try{
-    const n=userName();
-    if(!n || !window.piexif || !blob || blob.type!=="image/jpeg") return blob;
+    const p=exifPrefs();
+    if(!p.on || (!p.artist && !p.copyr) || !window.piexif || !blob || blob.type!=="image/jpeg") return blob;
     const dataUrl=await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(r.error); r.readAsDataURL(blob); });
     const zeroth={};
-    zeroth[piexif.ImageIFD.Artist]=n;
-    zeroth[piexif.ImageIFD.Copyright]="Copyright "+n;
+    if(p.artist) zeroth[piexif.ImageIFD.Artist]=p.artist;
+    if(p.copyr) zeroth[piexif.ImageIFD.Copyright]=p.copyr;
     zeroth[piexif.ImageIFD.Software]="Frame Sense";
     const exifBytes=piexif.dump({"0th":zeroth,"Exif":{},"GPS":{},"Interop":{},"1st":{},"thumbnail":null});
     const inserted=piexif.insert(exifBytes, dataUrl);
@@ -956,6 +966,13 @@ async function renderEdit(){
       <button class="btn btn-ghost" id="ex-instagram" style="margin-top:8px">Instagram copy · 1080 px, saved to project</button>
     </div>
     <div class="card">
+      <div class="eyebrow">PHOTOGRAPHER CREDIT · EXIF · OPTIONAL, OFF BY DEFAULT</div>
+      <div class="slider-row"><span>Embed credit in new exports</span><input type="checkbox" id="exif-on" style="width:20px;height:20px;flex:0 0 auto"></div>
+      <div class="slider-row"><span>Photographer</span><input type="text" id="exif-artist" maxlength="80" placeholder="Type the credit owner name" style="flex:1"></div>
+      <div class="slider-row"><span>Copyright line</span><input type="text" id="exif-copy" maxlength="120" placeholder="e.g. © 2026 First Last" style="flex:1"></div>
+      <p class="field-note">Nothing is embedded unless you switch this on and type the values yourself: the greeting name is never used as a rights claim. New exports will embed exactly: <b id="exif-what">(embedding is off)</b>. Originals and already-saved copies are never changed; turn it off and export again for a clean copy.</p>
+    </div>
+    <div class="card">
       <div class="eyebrow">SESSION TONE · PROJECT</div>
       <button class="btn btn-ghost" id="tone-all">Apply this tone to all photos in project</button>
       <p class="field-note" style="margin-top:8px">Mirrors Session Tone approval: the approved tone applies to the whole session, originals stay untouched.</p>
@@ -1063,6 +1080,15 @@ async function renderEdit(){
   cmp.addEventListener("pointercancel", showAfter);
   cmp.addEventListener("pointerleave", showAfter);
   // export
+  // photographer credit (EXIF) controls: explicit opt-in, values typed by the user
+  const exOn=$("#exif-on"), exA=$("#exif-artist"), exC=$("#exif-copy");
+  const p0=exifPrefs();
+  exOn.checked=p0.on; exA.value=p0.artist; exC.value=p0.copyr;
+  const exifWhat=()=>{ const p=exifPrefs(); const bits=[]; if(p.artist) bits.push("Artist: "+p.artist); if(p.copyr) bits.push("Copyright: "+p.copyr); if(p.on) bits.push("Software: Frame Sense"); $("#exif-what").textContent = p.on ? (bits.join(" · ")||"(fill the fields above)") : "(embedding is off)"; };
+  exOn.addEventListener("change", ()=>{ try{ localStorage.setItem("fsExifOn", exOn.checked?"1":"0"); }catch(_){} exifWhat(); });
+  exA.addEventListener("input", ()=>{ try{ localStorage.setItem("fsExifArtist", exA.value); }catch(_){} exifWhat(); });
+  exC.addEventListener("input", ()=>{ try{ localStorage.setItem("fsExifCopy", exC.value); }catch(_){} exifWhat(); });
+  exifWhat();
   $("#ex-save").addEventListener("click", ()=>doExport(photo, false));
   $("#ex-save-copy").addEventListener("click", ()=>doExport(photo, true));
   // dimensions
