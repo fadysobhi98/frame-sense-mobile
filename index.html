@@ -183,7 +183,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Originals are never modified. Editing is non-destructive and exports are new JPEG copies, exactly as the Frame Sense specification requires.</span>
     </div>
-    <footer class="foot">Frame Sense Mobile · v1.7.2 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 verified; NEF / ARW / DNG untested) decodes on this device with the RAW file kept untouched. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Desktop pairing is still planned.</footer>
+    <footer class="foot">Frame Sense Mobile · v1.7.3 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 verified; NEF / ARW / DNG untested) decodes on this device with the RAW file kept untouched. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Exported JPEGs carry your name as photographer copyright (EXIF); originals stay untouched. Desktop pairing is still planned.</footer>
   </section>
 
   <!-- PROJECTS -->
@@ -274,6 +274,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
 <div class="toast" id="toast"></div>
 <input type="file" id="file-input" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.cr2,.cr3,.nef,.arw,.dng" multiple style="display:none">
 
+<script src="vendor/piexif.js"></script>
 <script>
 "use strict";
 /* ---------- storage ---------- */
@@ -346,6 +347,27 @@ function filterString(e){
 }
 // Bake the same edits into pixels. Needed because iOS Safari ignores canvas ctx.filter,
 // which silently exported the "before" image. This path works everywhere.
+/* Photographer copyright (EXIF): embeds the on-device profile name into exported JPEG
+   metadata (Artist + Copyright + Software). Export-only, originals untouched.
+   Uses the vendored piexif library (./vendor/piexif.js, MIT). Any failure returns
+   the original blob so export can never break because of metadata. */
+async function withCopyright(blob){
+  try{
+    const n=userName();
+    if(!n || !window.piexif || !blob || blob.type!=="image/jpeg") return blob;
+    const dataUrl=await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(r.error); r.readAsDataURL(blob); });
+    const zeroth={};
+    zeroth[piexif.ImageIFD.Artist]=n;
+    zeroth[piexif.ImageIFD.Copyright]="Copyright "+n;
+    zeroth[piexif.ImageIFD.Software]="Frame Sense";
+    const exifBytes=piexif.dump({"0th":zeroth,"Exif":{},"GPS":{},"Interop":{},"1st":{},"thumbnail":null});
+    const inserted=piexif.insert(exifBytes, dataUrl);
+    const b64=inserted.replace(/^data:image\/jpeg;base64,/, "");
+    const bin=atob(b64); const bytes=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+    return new Blob([bytes], {type:"image/jpeg"});
+  }catch(_){ return blob; }
+}
 function bakeEdits(canvas, e){
   const b=e.b??1, c=e.c??1, s=e.s??1, w=e.w??0, sh=e.sh||0;
   const ctx=canvas.getContext("2d");
@@ -826,8 +848,9 @@ async function buildCollage(){
       const sx=(img.naturalWidth-sw)/2, sy=(img.naturalHeight-sh)/2;
       ctx.drawImage(img,sx,sy,sw,sh,x,y,cw,ch);
     }
-    const blob=await new Promise(res=>cv.toBlob(res,"image/jpeg",0.9));
+    let blob=await new Promise(res=>cv.toBlob(res,"image/jpeg",0.9));
     if(!blob) throw new Error("collage encode failed");
+    blob=await withCopyright(blob);
     await idbPut("photos",{ id:uid(), projectId:proj.id, kind:"export", name:"collage_"+n+"_photos.jpg", blob, created:Date.now() });
     state.collageMode=false; state.collageSel=[];
     toast("Collage saved in the Edited tab (simple grid, JPEG)");
@@ -1019,7 +1042,8 @@ async function renderEdit(){
       x2.drawImage(c,-W/2,-H/2);
       bakeEdits(c2, state.edit);
       const q=Math.min(100,Math.max(50,state.edit.quality))/100;
-      const blob=await new Promise(res=>c2.toBlob(res,"image/jpeg",q));
+      let blob=await new Promise(res=>c2.toBlob(res,"image/jpeg",q));
+      blob=await withCopyright(blob);
       await idbPut("photos",{ id:uid(), projectId:photo.projectId, kind:"export", parentId:photo.id,
         name:photo.name.replace(/\.[^.]+$/,"")+"_retouched.jpg", blob, created:Date.now() });
       toast("AI retouch done on "+faces.length+" face"+(faces.length===1?"":"s")+". Saved as a new edited copy; original untouched.");
@@ -1164,7 +1188,8 @@ async function doInstagramExport(photo){
   try{
     const canvas=await buildExportCanvas(photo, 1080);
     const q=Math.min(100,Math.max(50,state.edit.quality))/100;
-    const blob=await new Promise(res=>canvas.toBlob(res,"image/jpeg",q));
+    let blob=await new Promise(res=>canvas.toBlob(res,"image/jpeg",q));
+    blob=await withCopyright(blob);
     if(!blob) throw new Error("Export failed");
     await persistEdits(photo);
     await idbPut("photos", {
@@ -1183,7 +1208,8 @@ async function doExport(photo, alsoDownload){
   try{
     const canvas=await buildExportCanvas(photo, 0);
     const q = Math.min(100, Math.max(50, state.edit.quality))/100;
-    const blob = await new Promise(res=>canvas.toBlob(res,"image/jpeg",q));
+    let blob = await new Promise(res=>canvas.toBlob(res,"image/jpeg",q));
+    blob = await withCopyright(blob);
     if(!blob) throw new Error("Export failed");
     await persistEdits(photo);
     await idbPut("photos", {
