@@ -183,7 +183,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Originals are never modified. Editing is non-destructive and exports are new JPEG copies, exactly as the Frame Sense specification requires.</span>
     </div>
-    <footer class="foot">Frame Sense Mobile · v1.4.2 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch. Scene categories (Dance / Party / Hall), RAW support and desktop pairing are still planned.</footer>
+    <footer class="foot">Frame Sense Mobile · v1.5 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch. Scene categories (Dance / Party / Hall), RAW support and desktop pairing are still planned.</footer>
   </section>
 
   <!-- PROJECTS -->
@@ -495,7 +495,15 @@ async function renderGallery(){
       <button class="${tab==="originals"?"active":""}" data-tab="originals">Originals (${originals.length})</button>
       <button class="${tab==="exports"?"active":""}" data-tab="exports">Edited (${exports_.length})</button>
     </div>
-    ${state.galleryGroup&&tab==="originals" ? (()=>{
+    ${state.sceneGroup&&tab==="originals" ? (()=>{
+        const order=[["dance","DANCE"],["party","PARTY & CELEBRATIONS"],["hall","VENUE & HALL"],["portrait","PORTRAITS"],["details","DETAILS & CLOSE-UPS"],["other","UNCERTAIN & OTHER"]];
+        const sections=order.map(([key,label])=>{
+          const v=shown.filter(p=>((p.scene&&p.scene.key)||"other")===key);
+          if(!v.length) return "";
+          return `<div class="eyebrow" style="margin-top:10px">${label} (${v.length})</div><div class="grid">${v.map(p=>`<div class="thumb" data-phid="${p.id}"><img src="${URL.createObjectURL(p.blob)}" alt="">${qBadge(p.analysis)}</div>`).join("")}</div>`;
+        }).join("");
+        return sections + `<div class="note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg><span>Scene groups are experimental zero-shot guesses from a small on-device model; photos it is unsure about land in Uncertain &amp; Other. Check before relying on them.</span></div>`;
+      })() : state.galleryGroup&&tab==="originals" ? (()=>{
         const grp=[["PORTRAITS (1 PERSON)",p=>p.faces===1],["GROUP SHOTS (2+ PEOPLE)",p=>p.faces>=2],["DETAILS & OTHER (NO FACES)",p=>p.faces==null||p.faces===0]];
         return grp.map(([label,test])=>{
           const v=shown.filter(test);
@@ -523,6 +531,10 @@ async function renderGallery(){
       <button class="btn btn-ghost" id="ai-enable">Enable on-device AI (one-time download, about 10 MB)</button>
       <button class="btn btn-ghost" id="ai-group" style="display:none; margin-top:8px">Group photos by people (AI face detection)</button>
       <button class="btn btn-ghost" id="ai-remove" style="display:none; margin-top:8px; opacity:.75">Remove AI engine from this device (frees about 10 MB)</button>
+      <div id="scene-status" class="sub" style="margin:14px 0 10px">Scene grouping engine (experimental): not installed.</div>
+      <button class="btn btn-ghost" id="scene-enable">Enable scene grouping (experimental, one-time download, about 66 MB)</button>
+      <button class="btn btn-ghost" id="scene-group" style="display:none; margin-top:8px">Group by scene (experimental)</button>
+      <button class="btn btn-ghost" id="scene-remove" style="display:none; margin-top:8px; opacity:.75">Remove scene engine from this device (frees about 66 MB)</button>
       <div class="note" style="margin-top:8px">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
         <span>The engine is downloaded once, cached on your device, and works offline after. Photos are analyzed on this phone and are never uploaded anywhere.</span>
@@ -619,6 +631,62 @@ async function renderGallery(){
       }catch(e){ toast("Face detection failed on this device"); }
       aiGroup.disabled=false;
       aiGroup.textContent = state.galleryGroup ? "Ungroup photos" : "Group photos by people (AI face detection)";
+    });
+    // scene grouping engine (experimental)
+    const scStatus=body.querySelector("#scene-status"), scEnable=body.querySelector("#scene-enable"), scGroup=body.querySelector("#scene-group"), scRemove=body.querySelector("#scene-remove");
+    if(sceneConsented()){
+      scStatus.textContent="Scene grouping engine (experimental): approved. It loads on first use, no extra downloads after.";
+      scEnable.style.display="none"; scGroup.style.display="block"; scRemove.style.display="block";
+    }
+    scEnable.addEventListener("click", async ()=>{
+      scEnable.disabled=true; scEnable.textContent="Downloading scene engine (about 66 MB, one time)…";
+      try{
+        await ensureSceneAI();
+        try{ localStorage.setItem("fsAIScene","1"); }catch(_){}
+        scStatus.textContent="Scene grouping engine (experimental): ready on this device (works offline now).";
+        scEnable.style.display="none"; scGroup.style.display="block"; scRemove.style.display="block";
+        toast("Scene engine ready. Photos are analyzed on this device only.");
+      }catch(e){
+        scEnable.disabled=false; scEnable.textContent="Enable scene grouping (experimental, one-time download, about 66 MB)";
+        toast("Scene engine download failed. Check the connection and try again.");
+      }
+    });
+    scGroup.addEventListener("click", async ()=>{
+      const origs=(await idbAll("photos")).filter(x=>x.projectId===proj.id && x.kind==="original");
+      if(!origs.length){ toast("Import photos first"); return; }
+      scGroup.disabled=true; scGroup.textContent="Classifying scenes on this device…";
+      try{
+        await ensureSceneAI();
+        for(const p of origs){
+          if(!p.scene){ p.scene = await classifyScene(p); await idbPut("photos", p); }
+        }
+        state.galleryGroup=false; state.sceneGroup = !state.sceneGroup;
+        renderGallery();
+      }catch(e){ toast("Scene classification failed on this device"); }
+      scGroup.disabled=false;
+      scGroup.textContent = state.sceneGroup ? "Ungroup scenes" : "Group by scene (experimental)";
+    });
+    scRemove.addEventListener("click", async ()=>{
+      scRemove.disabled=true; scRemove.textContent="Removing scene engine from this device…";
+      try{ localStorage.removeItem("fsAIScene"); }catch(_){}
+      sceneTextModel=null; sceneVisionModel=null; sceneTokenizer=null; sceneProcessor=null; sceneTextEmbeds=null; sceneLoading=null;
+      try{
+        const keys=await caches.keys();
+        for(const k of keys){
+          const cache=await caches.open(k);
+          const reqs=await cache.keys();
+          for(const r of reqs){ if(/huggingface|hf\.co|onnxruntime/.test(r.url)) await cache.delete(r); }
+        }
+      }catch(_){}
+      state.sceneGroup=false;
+      scStatus.textContent="Scene grouping engine (experimental): not installed.";
+      scEnable.style.display="block"; scEnable.disabled=false;
+      scEnable.textContent="Enable scene grouping (experimental, one-time download, about 66 MB)";
+      scGroup.style.display="none";
+      scRemove.style.display="none"; scRemove.disabled=false;
+      scRemove.textContent="Remove scene engine from this device (frees about 66 MB)";
+      toast("Scene engine removed from this device. Your photos and projects are untouched.");
+      renderGallery();
     });
   }
   // background basic quality checks (on-device, cached per photo)
@@ -929,6 +997,55 @@ const AI_WASM="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm
 const AI_MODEL="https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
 let faceDetector=null, aiLoading=null;
 function aiConsented(){ try{ return localStorage.getItem("fsAI")==="1"; }catch(_){ return false; } }
+function sceneConsented(){ try{ return localStorage.getItem("fsAIScene")==="1"; }catch(_){ return false; } }
+
+/* ---------- Scene grouping engine (experimental, zero-shot MobileCLIP-S0, on-device) ---------- */
+let sceneT=null, sceneTextModel=null, sceneVisionModel=null, sceneTokenizer=null, sceneProcessor=null, sceneTextEmbeds=null, sceneLoading=null;
+const SCENE_LABELS=[
+  "people dancing",
+  "a party, wedding ceremony or celebration with people",
+  "an empty wedding or event hall",
+  "a posed portrait photo of a person looking at the camera",
+  "a close-up detail photo: jewelry, rings, food, drinks, flowers or decorations",
+  "an unrelated photo: landscape, animal, document or object"
+];
+const SCENE_KEYS=["dance","party","hall","portrait","details","other"];
+const SCENE_MODEL="Xenova/mobileclip_s0";
+async function ensureSceneAI(){
+  if(sceneTextModel&&sceneVisionModel) return true;
+  if(!sceneLoading){
+    sceneLoading=(async()=>{
+      const T=await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.6");
+      sceneT=T;
+      sceneTokenizer=await T.AutoTokenizer.from_pretrained(SCENE_MODEL);
+      sceneTextModel=await T.CLIPTextModelWithProjection.from_pretrained(SCENE_MODEL,{dtype:"q8"});
+      sceneProcessor=await T.AutoProcessor.from_pretrained(SCENE_MODEL);
+      sceneVisionModel=await T.CLIPVisionModelWithProjection.from_pretrained(SCENE_MODEL,{dtype:"fp16"});
+      const ti=sceneTokenizer(SCENE_LABELS,{padding:"max_length",truncation:true});
+      const {text_embeds}=await sceneTextModel(ti);
+      sceneTextEmbeds=text_embeds.normalize().tolist();
+      return true;
+    })();
+    sceneLoading.catch(()=>{ sceneLoading=null; });
+  }
+  return sceneLoading;
+}
+async function classifyScene(photo){
+  try{
+    const url=URL.createObjectURL(photo.blob);
+    let probs;
+    try{
+      const img=await sceneT.RawImage.fromURL(url);
+      const ii=await sceneProcessor(img);
+      const {image_embeds}=await sceneVisionModel(ii);
+      const ie=image_embeds.normalize().tolist()[0];
+      probs=sceneT.softmax(sceneTextEmbeds.map(te=>100*sceneT.dot(ie,te)));
+    }finally{ URL.revokeObjectURL(url); }
+    let bi=0; for(let i=1;i<probs.length;i++) if(probs[i]>probs[bi]) bi=i;
+    const key=(SCENE_KEYS[bi]==="other"||probs[bi]>=0.5)?SCENE_KEYS[bi]:"other";
+    return {key, prob:+probs[bi].toFixed(3), at:Date.now()};
+  }catch(_){ return {key:"other", prob:0, at:Date.now()}; }
+}
 async function ensureAI(){
   if(faceDetector) return faceDetector;
   if(aiLoading) return aiLoading;
