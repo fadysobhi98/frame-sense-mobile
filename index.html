@@ -183,7 +183,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Originals are never modified. Editing is non-destructive and exports are new JPEG copies, exactly as the Frame Sense specification requires.</span>
     </div>
-    <footer class="foot">Frame Sense Mobile · v1.7.6 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 and ARW verified; NEF / DNG untested) decodes on this device with the RAW file kept untouched, with optional wavelet noise reduction at decode. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Photographer credit (EXIF) is optional and off by default: nothing is embedded unless you switch it on and type the values; originals stay untouched. Desktop pairing is still planned.</footer>
+    <footer class="foot">Frame Sense Mobile · v1.7.7 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 and ARW verified; NEF / DNG untested) decodes on this device with the RAW file kept untouched, with optional wavelet noise reduction at decode. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Photographer credit (EXIF) is optional and off by default: nothing is embedded unless you switch it on and type the values; originals stay untouched. Desktop pairing is still planned.</footer>
   </section>
 
   <!-- PROJECTS -->
@@ -605,7 +605,7 @@ async function renderGallery(){
         <option value="100">Mild · wavelet filter, slight softening</option>
         <option value="200">Medium · wavelet filter, visible softening</option>
       </select></div>
-      <p class="field-note">RAW imports only, applied at decode by the libraw wavelet filter (signal processing, no AI). Measured on this device with a clean CR2 sample: Mild cut grain about 20% and kept about 76% of fine-detail energy; Medium cut about 36% and kept about 55%. A noisy photo benefits more. The RAW file stays untouched: re-import with a different setting any time.</p>
+      <p class="field-note">Optional for RAW imports, applied at decode (libraw wavelet filter, signal processing, no AI). Stronger settings reduce grain but can soften fine detail, and results vary by image. The RAW file stays untouched: re-import with a different setting any time.</p>
       <div class="note" style="margin-top:8px">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
         <span>The engine is downloaded once, cached on your device, and works offline after. Photos are analyzed on this phone and are never uploaded anywhere.</span>
