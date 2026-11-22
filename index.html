@@ -186,7 +186,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Originals are never modified. Editing is non-destructive and exports are new JPEG copies, exactly as the Frame Sense specification requires.</span>
     </div>
-    <footer class="foot">Frame Sense Mobile · v1.7.11 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 and ARW verified; NEF / DNG untested) decodes on this device with the RAW file kept untouched, with optional wavelet noise reduction at decode. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Photographer credit (EXIF) is optional and off by default: nothing is embedded unless you switch it on and type the values; originals stay untouched. Desktop pairing is still planned.</footer>
+    <footer class="foot">Frame Sense Mobile · v1.7.12 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 and ARW verified; NEF / DNG untested) decodes on this device with the RAW file kept untouched, with optional wavelet noise reduction at decode. High Sharpness, Crop / Instagram Ready and simple-grid collages are built in. Photographer credit (EXIF) is optional and off by default: nothing is embedded unless you switch it on and type the values; originals stay untouched. Desktop pairing is still planned.</footer>
   </section>
 
   <!-- PROJECTS -->
@@ -342,6 +342,24 @@ function idbAll(store){
 function idbDel(store, key){
   if(!db){ mem[store].delete(key); return Promise.resolve(); }
   return new Promise((res,rej)=>{ const q=tx(store,"readwrite").delete(key); q.onsuccess=()=>res(); q.onerror=e=>rej(e); });
+}
+/* read back a freshly stored photo and try to decode it: catches a copy that
+   went into device storage unreadable (truncated/empty write). Never deletes
+   or overwrites the stored record; one immediate retry of the same write only. */
+async function verifyStoredPhoto(val){
+  if(storageMode!=="device") return true;
+  try{
+    const back=await idbGet("photos", val.id);
+    if(!back || !back.blob || back.blob.size!==val.blob.size) return false;
+    await loadImage(back.blob);
+    return true;
+  }catch(_){ return false; }
+}
+async function idbPutPhotoVerified(val){
+  await idbPut("photos", val);
+  if(await verifyStoredPhoto(val)) return true;
+  try{ await idbPut("photos", val); }catch(_){}
+  return await verifyStoredPhoto(val);
 }
 const uid = ()=> Date.now().toString(36) + Math.random().toString(36).slice(2,8);
 
@@ -909,8 +927,8 @@ async function buildCollage(){
 async function importFiles(files){
   const proj=activeProject();
   if(!proj){ toast("Create a project first"); return; }
-  let ok=0, skipped=0, rawNoEngine=0, rawFailed=0, rawOk=0;
-  const badReads=[];
+  let ok=0, skipped=0, rawNoEngine=0, rawFailed=0, rawOk=0, storeFailed=0;
+  const badReads=[], storeFailedNames=[];
   for(const f of files){
     if(!f.size){ skipped++; continue; }
     if(/^image\/(jpeg|png|webp|heic|heif)$/i.test(f.type) || /\.(jpe?g|png|webp|heic|heif)$/i.test(f.name)){
@@ -919,16 +937,17 @@ async function importFiles(files){
       }catch(_){
         skipped++; badReads.push(f.name); continue;
       }
-      await idbPut("photos", { id:uid(), projectId:proj.id, name:f.name, blob:f, kind:"original", edits:null, created:Date.now() });
-      ok++;
+      let storedOk=false;
+      try{ storedOk=await idbPutPhotoVerified({ id:uid(), projectId:proj.id, name:f.name, blob:f, kind:"original", edits:null, created:Date.now() }); }catch(_){}
+      if(storedOk) ok++; else { storeFailed++; storeFailedNames.push(f.name); }
     } else if(/\.(cr2|cr3|nef|arw|dng)$/i.test(f.name)){
       if(!rawConsented()){ rawNoEngine++; continue; }
       try{
         toast(`Decoding RAW file ${f.name} on this device, large files can take a few seconds…`);
         const d=await decodeRAW(f);
-        await idbPut("photos", { id:uid(), projectId:proj.id, name:f.name, blob:d.blob, kind:"original", edits:null, created:Date.now(),
+        const storedOk=await idbPutPhotoVerified({ id:uid(), projectId:proj.id, name:f.name, blob:d.blob, kind:"original", edits:null, created:Date.now(),
           raw:{ name:f.name, format:(f.name.split(".").pop()||"").toUpperCase(), width:d.width, height:d.height, blob:f } });
-        rawOk++;
+        if(storedOk) rawOk++; else { storeFailed++; storeFailedNames.push(f.name); }
       }catch(e){
         if(e && (e.name==="QuotaExceededError" || /quota/i.test(e.message||""))) toast("Not enough free storage on this device to keep the RAW original. Nothing was imported or deleted.");
         else toast(`Could not decode ${f.name}: this RAW variant may be unsupported. Nothing was changed.`);
@@ -941,6 +960,7 @@ async function importFiles(files){
   if(rawNoEngine) parts.push(`${rawNoEngine} RAW file${rawNoEngine===1?"":"s"} ${rawNoEngine===1?"needs":"need"} the RAW import engine, enable it in Gallery (about 2 MB)`);
   if(rawFailed) parts.push(`${rawFailed} RAW file${rawFailed===1?"":"s"} could not be decoded`);
   if(badReads.length) parts.push(`${badReads.length} file${badReads.length===1?"":"s"} could not be read by this browser (${badReads.slice(0,3).join(", ")}) - nothing imported for them; try exporting them as JPEG from the Photos app first`);
+  if(storeFailed) parts.push(`${storeFailed} photo${storeFailed===1?"":"s"} (${storeFailedNames.slice(0,3).join(", ")}) could not be verified in this device's storage after import - the entry was kept, not deleted, and will show as unreadable if the saved copy is damaged`);
   toast(parts.join(" · "));
   renderGallery(); renderHome();
 }
@@ -963,10 +983,27 @@ async function renderEdit(){
   let decodeOk=true, url="";
   try{ await loadImage(photo.blob); url=await previewURL(photo); }
   catch(_){ decodeOk=false; }
+  /* for an unreadable saved copy, describe what the stored bytes look like:
+     size + format hint from the first bytes. A hint only - it cannot prove
+     the copy is complete, the decode above already failed. */
+  let sniff="";
+  if(!decodeOk){
+    try{
+      const b=photo.blob;
+      if(!b || !b.size) sniff="Saved copy on this device: 0 bytes (empty).";
+      else{
+        const h=new Uint8Array(await b.slice(0,16).arrayBuffer());
+        const mb=b.size>=1048576 ? (b.size/1048576).toFixed(1)+" MB" : Math.max(1,Math.round(b.size/1024))+" KB";
+        if(h[0]===0xFF&&h[1]===0xD8) sniff=`Saved copy on this device: ${mb}, starts like JPEG data.`;
+        else if(h[4]===0x66&&h[5]===0x74&&h[6]===0x79&&h[7]===0x70) sniff=`Saved copy on this device: ${mb}, starts like HEIC/HEIF data, not JPEG.`;
+        else sniff=`Saved copy on this device: ${mb}, unrecognized data.`;
+      }
+    }catch(_){ sniff=""; }
+  }
   body.innerHTML = `
     <div class="edit-stage">
       ${decodeOk ? `<img id="edit-img" src="${url}" style="filter:${filterString(state.edit)}">
-      <button class="hold-compare" id="compare-btn">HOLD · BEFORE</button>` : `<div class="broken-photo"><b>This saved copy can't be read by this browser.</b><br>Keep this entry: it may hold your edits and could be the only saved copy here. If the original photo is still in your phone's Photos, import it again as a second copy and check that the new copy opens before removing anything yourself. Nothing is deleted automatically.</div>`}
+      <button class="hold-compare" id="compare-btn">HOLD · BEFORE</button>` : `<div class="broken-photo"><b>This saved copy can't be read by this browser.</b><br>Keep this entry: it may hold your edits and could be the only saved copy here. If the original photo is still in your phone's Photos, import it again as a second copy and check that the new copy opens before removing anything yourself. Nothing is deleted automatically.${sniff?`<br><span style="opacity:.75;font-size:12px">${sniff}</span>`:""}</div>`}
     </div>
     <div class="eyebrow">SESSION TONE</div>
     <div class="presets" id="presets"></div>
@@ -1619,4 +1656,4 @@ window.addEventListener("DOMContentLoaded", async ()=>{
   </div>
 </div>
 </body>
-                     </html>
+  </html>
