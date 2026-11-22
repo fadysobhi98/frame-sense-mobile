@@ -640,7 +640,7 @@ async function renderGallery(){
     if(!origs.length){ toast("Import photos first"); return; }
     bestBtn.disabled=true; bestBtn.textContent="Scoring photos on this device…";
     for(const p of origs){
-      if(!p.analysis || p.analysis.score==null || p.analysis.hash==null){
+      if(!p.analysis || p.analysis.score==null){
         p.analysis = await analyzePhoto(p);
         if(p.analysis) await idbPut("photos", p);
       }
@@ -648,32 +648,14 @@ async function renderGallery(){
     const scores=origs.map(p=>p.analysis&&p.analysis.score).filter(v=>v!=null).sort((a,b)=>a-b);
     if(!scores.length){ toast("Could not score photos on this device"); bestBtn.disabled=false; bestBtn.innerHTML="&#9733; Pick Best Shots (auto, on this device)"; return; }
     const med=scores[Math.floor(scores.length/2)];
-    // group near-duplicate (burst) shots by dHash hamming distance
-    const ham=(a,b)=>{ try{ let x=BigInt("0x"+(a||"0"))^BigInt("0x"+(b||"0")), c=0; while(x){ c+=Number(x&1n); x>>=1n; } return c; }catch(_){ return 99; } };
-    const groupId=new Map(), groupRep=new Map(); let gCount=0;
-    for(const p of origs){
-      const h=p.analysis&&p.analysis.hash;
-      let gid=-1;
-      for(const [g,rep] of groupRep){ if(ham(h,rep)<=6){ gid=g; break; } }
-      if(gid<0){ gid=gCount++; groupRep.set(gid,h); }
-      groupId.set(p.id, gid);
-    }
-    // per group, only the top scorer may carry the badge
-    const topOfGroup=new Map();
-    for(const p of origs){
-      const g=groupId.get(p.id), v=(p.analysis&&p.analysis.score)||0;
-      if(!topOfGroup.has(g) || v>topOfGroup.get(g).v) topOfGroup.set(g,{id:p.id,v});
-    }
-    let n=0, bursts=0;
+    let n=0;
     for(const p of origs){
       const v=p.analysis&&p.analysis.score;
-      const g=groupId.get(p.id);
-      const isBest = v!=null && v>=med && v>0.05 && topOfGroup.get(g).id===p.id;
+      const isBest = v!=null && v>=med && v>0.05;
       p.best=isBest; if(isBest)n++;
       await idbPut("photos", p);
     }
-    for(const g of new Set(groupId.values())){ const cnt=origs.filter(p=>groupId.get(p.id)===g).length; if(cnt>1)bursts++; }
-    toast("Best Shots: "+n+" of "+origs.length+" chosen on this device (bursts collapse to their sharpest shot; score = focus, exposure, noise)");
+    toast("Best Shots: "+n+" of "+origs.length+" chosen from on-device quality scores");
     renderGallery();
   });
   // AI Engine card
@@ -1477,13 +1459,7 @@ async function analyzePhoto(photo){
     const expoPenalty=Math.min(Math.abs(mean-125)/125,1);
     const noisePenalty=Math.min(noise/25,1);
     const score=+(focusTerm*0.55 + (1-expoPenalty)*0.3 + (1-noisePenalty)*0.15).toFixed(3);
-    // 64-bit dHash for near-duplicate (burst) grouping: 8x8 grid, horizontal compare
-    let hash=0n;
-    for(let gy=0;gy<8;gy++)for(let gx=0;gx<8;gx++){
-      const ya=Math.floor(gy*h/8)*w, xa=Math.floor(gx*w/9), xb=Math.floor((gx+1)*w/9);
-      if(gray[ya+xa]>gray[ya+xb]) hash |= (1n<<BigInt(gy*8+gx));
-    }
-    return {exposure:Math.round(mean), focus:Math.round(lv), noise:+noise.toFixed(1), cast:+cast.toFixed(3), flags, score, hash:hash.toString(16)};
+    return {exposure:Math.round(mean), focus:Math.round(lv), noise:+noise.toFixed(1), cast:+cast.toFixed(3), flags, score};
   }catch(_){ return null; }
 }
 function qBadge(a){
@@ -1562,4 +1538,4 @@ window.addEventListener("DOMContentLoaded", async ()=>{
   </div>
 </div>
 </body>
-  </html>
+                                                                                                      </html>
