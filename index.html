@@ -183,7 +183,7 @@ footer.foot{color:var(--muted); font-size:10.5px; text-align:center; margin-top:
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       <span>Originals are never modified. Editing is non-destructive and exports are new JPEG copies, exactly as the Frame Sense specification requires.</span>
     </div>
-    <footer class="foot">Frame Sense Mobile · v1.7.0 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 verified; NEF / ARW / DNG untested) decodes on this device with the RAW file kept untouched. High Sharpness and Crop / Instagram Ready exports are built in. Desktop pairing is still planned.</footer>
+    <footer class="foot">Frame Sense Mobile · v1.7.1 · Photos stay on this device.<br>On-device AI: face detection powers people grouping and skin retouch; scene grouping is experimental. RAW import (CR2 verified; NEF / ARW / DNG untested) decodes on this device with the RAW file kept untouched. High Sharpness and Crop / Instagram Ready exports are built in. Desktop pairing is still planned.</footer>
   </section>
 
   <!-- PROJECTS -->
@@ -817,7 +817,7 @@ async function renderEdit(){
       <br>Pick a photo in Gallery first.</div>`;
     return;
   }
-  const saved = photo.edits || {preset:"FS Basic", ...PRESETS["FS Basic"], quality:92, scale:100, rot:0, sh:0, crop:"none", approved:false};
+  const saved = photo.edits || {preset:"FS Basic", ...PRESETS["FS Basic"], quality:92, scale:100, rot:0, sh:0, crop:"none", cropX:0.5, cropY:0.5, approved:false};
   state.edit = {...saved};
   $("#edit-sub").textContent = photo.raw ? photo.raw.name + " · RAW original stored untouched · you are editing its JPEG working copy" : photo.name + " · non-destructive, original untouched";
   const url = await previewURL(photo);
@@ -853,6 +853,12 @@ async function renderEdit(){
         <option value="4:5">Portrait 4:5 (Instagram)</option>
         <option value="16:9">Landscape 16:9</option>
       </select></div>
+      <div id="crop-tools" style="display:none">
+        <canvas id="crop-preview" style="width:100%;border-radius:12px;border:1px solid var(--line);margin-top:6px"></canvas>
+        <div class="slider-row"><span>Frame position &#8596;</span><input type="range" id="sl-cropx" min="0" max="1" step="0.01" value="${state.edit.cropX??0.5}"></div>
+        <div class="slider-row"><span>Frame position &#8597;</span><input type="range" id="sl-cropy" min="0" max="1" step="0.01" value="${state.edit.cropY??0.5}"></div>
+        <p class="field-note">This is the exact frame of the exported JPEG. Move the sliders to position the crop before exporting, the source photo stays untouched.</p>
+      </div>
       <div class="note" style="margin-top:4px">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
         <span>Export saves an edited JPEG inside this project automatically (Mobile Export Engine). The original stays untouched. Sharpen and crop are baked into the exported JPEG; the live preview shows tone only. "Instagram copy" adds a 1080 px version ready to post. "Save to phone gallery" opens the share sheet on iPhone; choose "Save Image" to put the edited JPEG straight into Photos.</span>
@@ -978,7 +984,15 @@ async function renderEdit(){
   scaleSel.addEventListener("change", ()=>{ state.edit.scale=parseInt(scaleSel.value,10); persistEdits(photo); });
   const cropSel=$("#sl-crop");
   cropSel.value=state.edit.crop||"none";
-  cropSel.addEventListener("change", ()=>{ state.edit.crop=cropSel.value; persistEdits(photo); toast("Crop set to "+cropSel.options[cropSel.selectedIndex].text+" · baked into the exported JPEG"); });
+  cropSel.addEventListener("change", ()=>{ state.edit.crop=cropSel.value; persistEdits(photo); updateCropPreview(photo); });
+  ["cropx","cropy"].forEach(k=>{
+    const sl=$("#sl-"+k);
+    sl.addEventListener("input", ()=>{
+      if(k==="cropx") state.edit.cropX=parseFloat(sl.value); else state.edit.cropY=parseFloat(sl.value);
+      persistEdits(photo); updateCropPreview(photo);
+    });
+  });
+  updateCropPreview(photo);
   $("#ex-instagram").addEventListener("click", ()=>doInstagramExport(photo));
   // rotate
   $("#rot-btn").addEventListener("click", async ()=>{
@@ -1030,6 +1044,26 @@ async function persistEdits(photo){
   photo.edits = {...state.edit};
   await idbPut("photos", photo);
 }
+async function updateCropPreview(photo){
+  const wrap=$("#crop-tools"); if(!wrap) return;
+  const crop=state.edit.crop||"none";
+  if(crop==="none"){ wrap.style.display="none"; return; }
+  wrap.style.display="block";
+  const url=await previewURL(photo);
+  const img=await new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=()=>rej(new Error("Could not render crop preview")); im.src=url; });
+  const parts=crop.split(":"), aspect=parseFloat(parts[0])/parseFloat(parts[1]);
+  let cw,ch;
+  if(img.naturalWidth/img.naturalHeight>aspect){ ch=img.naturalHeight; cw=Math.max(1,Math.round(ch*aspect)); } else { cw=img.naturalWidth; ch=Math.max(1,Math.round(cw/aspect)); }
+  const cx=state.edit.cropX??0.5, cy=state.edit.cropY??0.5;
+  const x0=Math.round((img.naturalWidth-cw)*cx), y0=Math.round((img.naturalHeight-ch)*cy);
+  const cv=$("#crop-preview");
+  const sc=Math.min(1, 720/cw);
+  cv.width=Math.round(cw*sc); cv.height=Math.round(ch*sc);
+  cv.getContext("2d").drawImage(img,x0,y0,cw,ch,0,0,cv.width,cv.height);
+  const slackX=img.naturalWidth-cw, slackY=img.naturalHeight-ch;
+  $("#sl-cropx").disabled=slackX<2; $("#sl-cropy").disabled=slackY<2;
+  $("#sl-cropx").value=String(cx); $("#sl-cropy").value=String(cy);
+}
 async function buildExportCanvas(photo, maxDim){
   const img = await loadImage(photo.blob);
   let canvas=document.createElement("canvas");
@@ -1047,7 +1081,7 @@ async function buildExportCanvas(photo, maxDim){
     const parts=crop.split(":"), aspect=parseFloat(parts[0])/parseFloat(parts[1]);
     let cw,ch;
     if(canvas.width/canvas.height>aspect){ ch=canvas.height; cw=Math.max(1,Math.round(ch*aspect)); } else { cw=canvas.width; ch=Math.max(1,Math.round(cw/aspect)); }
-    const x0=Math.round((canvas.width-cw)/2), y0=Math.round((canvas.height-ch)/2);
+    const x0=Math.round((canvas.width-cw)*(state.edit.cropX??0.5)), y0=Math.round((canvas.height-ch)*(state.edit.cropY??0.5));
     const c2=document.createElement("canvas"); c2.width=cw; c2.height=ch;
     c2.getContext("2d").drawImage(canvas,x0,y0,cw,ch,0,0,cw,ch);
     canvas=c2;
